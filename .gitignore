@@ -250,3 +250,4 @@ tags
 
 *.dump
 *.png
+.vscode/
