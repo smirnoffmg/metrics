@@ -1,0 +1,53 @@
+[tool.poetry]
+name = "metrics"
+version = "0.1.0"
+description = ""
+authors = ["Maksim Smirnov <smirnoffmg@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+numpy = "^1.26.3"
+jira = "^3.6.0"
+python-dateutil = "^2.8.2"
+matplotlib = "^3.8.2"
+pandas = "^2.1.4"
+scipy = "^1.11.4"
+seaborn = "^0.13.1"
+python-decouple = "^3.8"
+pydantic-settings = "^2.1.0"
+click = "^8.1.7"
+dependency-injector = "^4.41.0"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.12.1"
+ruff = "^0.1.11"
+isort = "^5.13.2"
+ipython = "^8.19.0"
+mypy = "^1.8.0"
+pytest = "^7.4.4"
+detect-secrets = "^1.4.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+select = ["ALL"]
+ignore = ["D", "ANN101", "G004", "PD901"]
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+lines-after-imports = 2
+sections = ['FUTURE', 'STDLIB', 'THIRDPARTY', 'FIRSTPARTY', 'LOCALFOLDER']
+
+[tool.mypy]
+plugins = 'numpy.typing.mypy_plugin'
