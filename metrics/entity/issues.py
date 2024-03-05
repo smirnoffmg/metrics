@@ -15,7 +15,13 @@ class Issue:
     statuses_x_periods: dict[str, timedelta] | None = None
 
     @property
-    def is_done(self) -> bool:
+    def was_done(self) -> bool:
+        """
+        Checks if the issue was in a done status at some point.
+
+        Returns:
+            bool: True if the issue was done, False otherwise.
+        """
         return self.last_finish_status_at is not None
 
     @property
