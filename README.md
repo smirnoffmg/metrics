@@ -17,8 +17,8 @@ Measure your dev team metrics using python and your task tracker.
 
 ## Articles
 
-    - [Метрики команды разработки](https://habr.com/ru/articles/788930/)
-    - [Software engineering metrics](https://medium.com/@maximsmirnov/software-engineering-metrics-613be9b99ccd)
+* [Метрики команды разработки](https://habr.com/ru/articles/788930/)
+* [Software engineering metrics](https://medium.com/@maximsmirnov/software-engineering-metrics-613be9b99ccd)
 
 ## How to run?
 
