@@ -33,7 +33,7 @@ def calculate_metrics(
     )
 
     vis_service.vis_df(
-        "througput.png",
+        "throughput.png",
         throughput,
         x_label="weeks",
         y_label="throughput",

@@ -28,6 +28,7 @@ ipython = "^8.19.0"
 mypy = "^1.8.0"
 pytest = "^7.4.4"
 detect-secrets = "^1.4.0"
+pytest-cov = "^4.1.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -38,7 +39,7 @@ build-backend = "poetry.core.masonry.api"
 target-version = "py311"
 line-length = 88
 select = ["ALL"]
-ignore = ["D", "ANN101", "G004", "PD901"]
+ignore = ["D", "ANN101", "G004", "PD901", "DTZ001", "S101"]
 
 [tool.black]
 line-length = 88
@@ -51,3 +52,7 @@ sections = ['FUTURE', 'STDLIB', 'THIRDPARTY', 'FIRSTPARTY', 'LOCALFOLDER']
 
 [tool.mypy]
 plugins = 'numpy.typing.mypy_plugin'
+
+[tool.codespell]
+skip = '*.lock'
+quiet-level = 3
