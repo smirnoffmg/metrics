@@ -12,8 +12,8 @@ from .utils import get_issues
 
 
 def parse_changelog_item(issue_created_at: datetime, changelog: dict) -> dict:
-    first_assignee_changed_at = issue_created_at
-    first_status_changed_at = issue_created_at
+    first_assignee_changed_at = None
+    first_status_changed_at = None
     last_status_changed_at = issue_created_at
     last_assignee_changed_at = issue_created_at
     last_finish_status_at = None
@@ -31,7 +31,13 @@ def parse_changelog_item(issue_created_at: datetime, changelog: dict) -> dict:
                 )
                 last_assignee_changed_at = history_ts
 
-                first_assignee_changed_at = min(first_assignee_changed_at, history_ts)
+                if first_assignee_changed_at is None:
+                    first_assignee_changed_at = history_ts
+                else:
+                    first_assignee_changed_at = min(
+                        first_assignee_changed_at,
+                        history_ts,
+                    )
 
             elif item["field"] == "status":
                 statuses_x_periods[item["fromString"]] += (
@@ -39,7 +45,10 @@ def parse_changelog_item(issue_created_at: datetime, changelog: dict) -> dict:
                 )
                 last_status_changed_at = history_ts
 
-                first_status_changed_at = min(first_status_changed_at, history_ts)
+                if first_status_changed_at is None:
+                    first_status_changed_at = history_ts
+                else:
+                    first_status_changed_at = min(first_status_changed_at, history_ts)
 
                 if item["toString"].lower() in DONE_STATUSES:
                     last_finish_status_at = history_ts
