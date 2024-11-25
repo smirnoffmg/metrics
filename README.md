@@ -28,7 +28,7 @@ poetry run python -m metrics --help
 ```
 
 ```shell
-poetry run python -m metrics --jira-server YOUR_SERVER_URL --jira_token YOUR_PERSONAL_TOKEN --jira-jql "project = Dev (for example)"
+poetry run python -m metrics --jira-server YOUR_SERVER_URL --jira-token YOUR_PERSONAL_TOKEN --jira-jql "project = Dev (for example)"
 ```
 
 ## Example output
