@@ -11,16 +11,19 @@ class Issue:
     first_status_change_at: datetime | None = None
     last_finish_status_at: datetime | None = None
 
+    status_history: list[str] | None = None
+
     doers_x_periods: dict[str, timedelta] | None = None
     statuses_x_periods: dict[str, timedelta] | None = None
 
     @property
     def was_done(self) -> bool:
-        """
-        Checks if the issue was in a done status at some point.
+        """Checks if the issue was in a done status at some point.
 
-        Returns:
+        Returns
+        -------
             bool: True if the issue was done, False otherwise.
+
         """
         return self.last_finish_status_at is not None
 

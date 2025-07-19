@@ -18,6 +18,8 @@ def parse_changelog_item(issue_created_at: datetime, changelog: dict) -> dict:
     last_assignee_changed_at = issue_created_at
     last_finish_status_at = None
 
+    status_history = ["created"]
+
     doers_x_periods = defaultdict(timedelta)
     statuses_x_periods = defaultdict(timedelta)
 
@@ -40,6 +42,8 @@ def parse_changelog_item(issue_created_at: datetime, changelog: dict) -> dict:
                     )
 
             elif item["field"] == "status":
+                status_history.append(item["toString"])
+
                 statuses_x_periods[item["fromString"]] += (
                     history_ts - last_status_changed_at
                 )
@@ -54,6 +58,7 @@ def parse_changelog_item(issue_created_at: datetime, changelog: dict) -> dict:
                     last_finish_status_at = history_ts
 
     return {
+        "status_history": status_history,
         "doers_x_periods": doers_x_periods,
         "statuses_x_periods": statuses_x_periods,
         "first_status_changed_at": first_status_changed_at,
@@ -88,6 +93,7 @@ class JiraAPIRepository(BaseIssuesRepository):
             statuses_x_periods=statuses_x_periods,
             first_status_change_at=changelog_data["first_status_changed_at"],
             last_finish_status_at=last_finish_status_at,
+            status_history=changelog_data["status_history"],
         )
 
     def get_raw_data(self) -> list[dict]:

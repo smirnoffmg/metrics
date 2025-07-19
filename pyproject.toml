@@ -39,17 +39,21 @@ build-backend = "poetry.core.masonry.api"
 [tool.ruff]
 target-version = "py311"
 line-length = 88
+
+[tool.ruff.lint]
 select = ["ALL"]
-ignore = ["D", "ANN101", "G004", "PD901", "DTZ001", "S101"]
+ignore = ["G004", "PD901", "DTZ001", "S101"]
+per-file-ignores = { "tests/*.py" = [
+    "ANN",
+    "D",
 
-[tool.black]
-line-length = 88
-target-version = ['py311']
+] } # Ignore missing return type for public function in tests
 
-[tool.isort]
-profile = "black"
-lines-after-imports = 2
-sections = ['FUTURE', 'STDLIB', 'THIRDPARTY', 'FIRSTPARTY', 'LOCALFOLDER']
+[tool.ruff.format]
+# Use Ruff as the formatter
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
 
 [tool.mypy]
 plugins = 'numpy.typing.mypy_plugin'
