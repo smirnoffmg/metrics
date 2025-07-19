@@ -18,11 +18,12 @@ class Issue:
 
     @property
     def was_done(self) -> bool:
-        """
-        Checks if the issue was in a done status at some point.
+        """Checks if the issue was in a done status at some point.
 
-        Returns:
+        Returns
+        -------
             bool: True if the issue was done, False otherwise.
+
         """
         return self.last_finish_status_at is not None
 

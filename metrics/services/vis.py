@@ -33,8 +33,14 @@ class VisService(BaseService):
         plt.xlabel(x_label.replace("_", " "))
         plt.ylabel(y_label.replace("_", " "))
 
-        plt.savefig(filename)
-        plt.clf()
+        try:
+            plt.savefig(filename)
+        except Exception as err:
+            self.logger.exception(f"Failed to save figure to {filename}")
+            msg = f"Failed to save figure to {filename}: {err}"
+            raise RuntimeError(msg) from err
+        finally:
+            plt.clf()
 
     def vis_cumulative_queue_time(
         self,
@@ -70,8 +76,14 @@ class VisService(BaseService):
 
         plt.tight_layout()
 
-        plt.savefig(filename)
-        plt.clf()
+        try:
+            plt.savefig(filename)
+        except Exception as err:
+            self.logger.exception(f"Failed to save figure to {filename}")
+            msg = f"Failed to save figure to {filename}: {err}"
+            raise RuntimeError(msg) from err
+        finally:
+            plt.clf()
 
     def vis_array_like(
         self,
@@ -80,7 +92,6 @@ class VisService(BaseService):
         x_label: str = "x_label",
         y_label: str = "y_label",
     ) -> None:
-
         plt.grid(True)
 
         counts, _, bars = plt.hist(
@@ -98,5 +109,11 @@ class VisService(BaseService):
 
         plt.tight_layout()
 
-        plt.savefig(filename)
-        plt.clf()
+        try:
+            plt.savefig(filename)
+        except Exception as err:
+            self.logger.exception(f"Failed to save figure to {filename}")
+            msg = f"Failed to save figure to {filename}: {err}"
+            raise RuntimeError(msg) from err
+        finally:
+            plt.clf()

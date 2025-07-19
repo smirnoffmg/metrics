@@ -84,8 +84,7 @@ class MetricsService(BaseService):
         timeslot: int = ONE_HOUR,
         limit: int = 1000,
     ) -> pd.DataFrame:
-        """
-        Считаем p50 время в каждом статусе по всему множеству задач
+        """Считаем p50 время в каждом статусе по всему множеству задач
         Минимальное время в статусе задаётся через timeslot
         """
         self.logger.debug("Calculating cumulative queue time...")

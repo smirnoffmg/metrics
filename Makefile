@@ -7,11 +7,20 @@ help:
 	poetry install
 	poetry run python -m metrics --help
 
+install:
+	pip install -r requirements.txt
+
 test:
-	poetry run pytest --cov=metrics --cov-report=term-missing:skip-covered tests/
+	pytest -v
 
 lint:
-	pre-commit run --all
+	ruff check metrics/ tests/
 
-run:
-	poetry run python -m metrics
+format:
+	ruff format metrics/ tests/
+
+coverage:
+	pytest --cov=metrics --cov-report=term-missing
+
+clean:
+	rm -rf .pytest_cache .coverage htmlcov output/*.png
