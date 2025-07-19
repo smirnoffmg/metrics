@@ -1,3 +1,8 @@
+include .env
+export
+
+.PHONY: all
+
 help:
 	poetry install
 	poetry run python -m metrics --help
@@ -7,3 +12,6 @@ test:
 
 lint:
 	pre-commit run --all
+
+run:
+	poetry run python -m metrics

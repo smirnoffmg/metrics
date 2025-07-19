@@ -11,6 +11,8 @@ class Issue:
     first_status_change_at: datetime | None = None
     last_finish_status_at: datetime | None = None
 
+    status_history: list[str] | None = None
+
     doers_x_periods: dict[str, timedelta] | None = None
     statuses_x_periods: dict[str, timedelta] | None = None
 
