@@ -24,7 +24,7 @@ def test_jiraissuesrepository_all():
                 "status": {"name": "Done"},
             },
             "changelog": {"histories": []},
-        }
+        },
     ]
     mock_converter = JiraDataConverter()
     repo = JiraIssuesRepository(mock_api_repo, mock_converter)

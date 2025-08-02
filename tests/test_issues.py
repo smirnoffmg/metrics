@@ -6,7 +6,7 @@ from metrics.entity import Issue
 from metrics.repository.base import BaseIssuesRepository
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_issue() -> Issue:
     return Issue(
         key="TEST-1",

@@ -4,7 +4,6 @@ from jira.exceptions import JIRAError
 
 from metrics.containers import Container
 from metrics.repository.base import BaseIssuesRepository
-from metrics.repository.jira import JiraAPIRepository
 from metrics.utils import get_jira_client
 
 

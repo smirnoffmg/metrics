@@ -16,7 +16,7 @@ class JiraAPIRepository:
 
 class JiraIssuesRepository(BaseIssuesRepository):
     def __init__(
-        self, api_repo: JiraAPIRepository, converter: JiraDataConverter
+        self, api_repo: JiraAPIRepository, converter: JiraDataConverter,
     ) -> None:
         self.api_repo = api_repo
         self.converter = converter

@@ -24,7 +24,9 @@ class JiraDataConverter:
             status_history=changelog_data["status_history"],
         )
 
-    def _parse_changelog_item(self, issue_created_at: datetime, changelog: dict) -> dict:
+    def _parse_changelog_item(
+        self, issue_created_at: datetime, changelog: dict,
+    ) -> dict:
         data: dict[str, Any] = {
             "status_history": ["created"],
             "doers_x_periods": defaultdict(timedelta),
@@ -45,7 +47,7 @@ class JiraDataConverter:
         return data
 
     def _parse_assignee_changes(
-        self, item: dict, history_ts: datetime, data: dict
+        self, item: dict, history_ts: datetime, data: dict,
     ) -> None:
         data["doers_x_periods"][item["fromString"]] += (
             history_ts - data["last_assignee_changed_at"]
@@ -55,11 +57,11 @@ class JiraDataConverter:
             data["first_assignee_changed_at"] = history_ts
         else:
             data["first_assignee_changed_at"] = min(
-                data["first_assignee_changed_at"], history_ts
+                data["first_assignee_changed_at"], history_ts,
             )
 
     def _parse_status_changes(
-        self, item: dict, history_ts: datetime, data: dict
+        self, item: dict, history_ts: datetime, data: dict,
     ) -> None:
         data["status_history"].append(item["toString"])
         data["statuses_x_periods"][item["fromString"]] += (
@@ -70,7 +72,7 @@ class JiraDataConverter:
             data["first_status_changed_at"] = history_ts
         else:
             data["first_status_changed_at"] = min(
-                data["first_status_changed_at"], history_ts
+                data["first_status_changed_at"], history_ts,
             )
         if item["toString"].lower() in DONE_STATUSES:
             data["last_finish_status_at"] = history_ts

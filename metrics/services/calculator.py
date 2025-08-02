@@ -19,7 +19,7 @@ class MetricCalculator(ABC):
 
 class TimeMetricCalculator(MetricCalculator):
     def _calculate_time_metric(
-        self, metric_name: str, timeslot: int, limit: int
+        self, metric_name: str, timeslot: int, limit: int,
     ) -> list[float]:
         res = []
         for issue in self.repo.all():
@@ -32,18 +32,22 @@ class TimeMetricCalculator(MetricCalculator):
 
 
 class CycleTimeCalculator(TimeMetricCalculator):
-    def calculate(self, timeslot: int = ONE_DAY, limit: int = CALC_LIMIT) -> list[float]:
+    def calculate(
+        self, timeslot: int = ONE_DAY, limit: int = CALC_LIMIT,
+    ) -> list[float]:
         return self._calculate_time_metric("cycle_time", timeslot, limit)
 
 
 class LeadTimeCalculator(TimeMetricCalculator):
-    def calculate(self, timeslot: int = ONE_DAY, limit: int = CALC_LIMIT) -> list[float]:
+    def calculate(
+        self, timeslot: int = ONE_DAY, limit: int = CALC_LIMIT,
+    ) -> list[float]:
         return self._calculate_time_metric("lead_time", timeslot, limit)
 
 
 class QueueTimeCalculator(MetricCalculator):
     def calculate(
-        self, timeslot: int = ONE_DAY, limit: int = CALC_LIMIT
+        self, timeslot: int = ONE_DAY, limit: int = CALC_LIMIT,
     ) -> dict[str, list[float]]:
         tmp = defaultdict(list)
         for issue in self.repo.all():
@@ -65,9 +69,7 @@ class ThroughputCalculator(MetricCalculator):
 
 
 class CumulativeQueueTimeCalculator(MetricCalculator):
-    def calculate(
-        self, timeslot: int = ONE_HOUR, limit: int = 1000
-    ) -> pd.DataFrame:
+    def calculate(self, timeslot: int = ONE_HOUR, limit: int = 1000) -> pd.DataFrame:
         tmp = defaultdict(list)
         for issue in self.repo.all():
             for status, td in issue.statuses_x_periods.items():
