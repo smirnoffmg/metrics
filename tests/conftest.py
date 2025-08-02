@@ -7,7 +7,7 @@ import pytest
 from metrics.entity.issues import Issue
 
 
-@pytest.fixture()
+@pytest.fixture
 def dummy_issue():
     return Issue(
         key="ISSUE-1",
@@ -19,7 +19,7 @@ def dummy_issue():
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def dummy_repo(dummy_issue):
     class DummyRepo:
         def all(self):
@@ -28,7 +28,7 @@ def dummy_repo(dummy_issue):
     return DummyRepo()
 
 
-@pytest.fixture()
+@pytest.fixture
 def temp_png_file():
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         filename = tmp.name

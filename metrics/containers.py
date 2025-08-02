@@ -45,11 +45,9 @@ class Container(containers.DeclarativeContainer):
     queue_time_calculator = providers.Factory(QueueTimeCalculator, repo)
     throughput_calculator = providers.Factory(ThroughputCalculator, repo)
     cumulative_queue_time_calculator = providers.Factory(
-        CumulativeQueueTimeCalculator, repo
+        CumulativeQueueTimeCalculator, repo,
     )
-    return_to_testing_calculator = providers.Factory(
-        ReturnToTestingCalculator, repo
-    )
+    return_to_testing_calculator = providers.Factory(ReturnToTestingCalculator, repo)
 
     metrics_service = providers.Factory(
         MetricsService,

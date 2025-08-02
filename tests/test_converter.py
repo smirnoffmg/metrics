@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from metrics.repository.converter import JiraDataConverter
 
@@ -16,18 +16,22 @@ def test_jiradataconverter_convert_data_to_issue():
     issue = converter.convert_data_to_issue(data_item)
     assert issue.key == "ISSUE-1"
     assert issue.status == "Done"
-    assert issue.created_at == datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    assert issue.created_at == datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
 
 
 def test_jiradataconverter_parse_changelog_item():
     converter = JiraDataConverter()
-    created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     changelog = {
         "histories": [
             {
                 "created": "2024-01-02T00:00:00.000+0000",
                 "items": [
-                    {"field": "status", "fromString": "To Do", "toString": "In Progress"}
+                    {
+                        "field": "status",
+                        "fromString": "To Do",
+                        "toString": "In Progress",
+                    },
                 ],
             },
             {
@@ -37,10 +41,10 @@ def test_jiradataconverter_parse_changelog_item():
                         "field": "assignee",
                         "fromString": "user1",
                         "toString": "user2",
-                    }
+                    },
                 ],
             },
-        ]
+        ],
     }
     result = converter._parse_changelog_item(created_at, changelog)
     assert "To Do" in result["statuses_x_periods"]
