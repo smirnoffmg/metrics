@@ -1,47 +1,102 @@
+from unittest.mock import MagicMock
+
 from metrics.services.metrics import MetricsService
 
-# All tests use the dummy_repo fixture from conftest.py
 
-
-def test_metricsservice_get_cycle_time(dummy_repo):
-    service = MetricsService(dummy_repo)
+def test_metricsservice_get_cycle_time():
+    cycle_time_calculator = MagicMock()
+    cycle_time_calculator.calculate.return_value = [1.0]
+    service = MetricsService(
+        cycle_time_calculator=cycle_time_calculator,
+        lead_time_calculator=MagicMock(),
+        queue_time_calculator=MagicMock(),
+        throughput_calculator=MagicMock(),
+        cumulative_queue_time_calculator=MagicMock(),
+        return_to_testing_calculator=MagicMock(),
+    )
     result = service.get_cycle_time()
-    assert isinstance(result, list)
-    assert result[0] >= 1
+    assert result == [1.0]
+    cycle_time_calculator.calculate.assert_called_once()
 
 
-def test_metricsservice_get_lead_time(dummy_repo):
-    service = MetricsService(dummy_repo)
+def test_metricsservice_get_lead_time():
+    lead_time_calculator = MagicMock()
+    lead_time_calculator.calculate.return_value = [2.0]
+    service = MetricsService(
+        cycle_time_calculator=MagicMock(),
+        lead_time_calculator=lead_time_calculator,
+        queue_time_calculator=MagicMock(),
+        throughput_calculator=MagicMock(),
+        cumulative_queue_time_calculator=MagicMock(),
+        return_to_testing_calculator=MagicMock(),
+    )
     result = service.get_lead_time()
-    assert isinstance(result, list)
-    assert result[0] >= 1
+    assert result == [2.0]
+    lead_time_calculator.calculate.assert_called_once()
 
 
-def test_metricsservice_get_queue_time(dummy_repo):
-    service = MetricsService(dummy_repo)
+def test_metricsservice_get_queue_time():
+    queue_time_calculator = MagicMock()
+    queue_time_calculator.calculate.return_value = {"In Progress": [3.0]}
+    service = MetricsService(
+        cycle_time_calculator=MagicMock(),
+        lead_time_calculator=MagicMock(),
+        queue_time_calculator=queue_time_calculator,
+        throughput_calculator=MagicMock(),
+        cumulative_queue_time_calculator=MagicMock(),
+        return_to_testing_calculator=MagicMock(),
+    )
     result = service.get_queue_time()
-    assert isinstance(result, dict)
-    assert any(isinstance(v, list) for v in result.values())
+    assert result == {"In Progress": [3.0]}
+    queue_time_calculator.calculate.assert_called_once()
 
 
-def test_metricsservice_get_throughput(dummy_repo):
-    service = MetricsService(dummy_repo)
+def test_metricsservice_get_throughput():
+    throughput_calculator = MagicMock()
+    throughput_calculator.calculate.return_value = {"2024W01": 5}
+    service = MetricsService(
+        cycle_time_calculator=MagicMock(),
+        lead_time_calculator=MagicMock(),
+        queue_time_calculator=MagicMock(),
+        throughput_calculator=throughput_calculator,
+        cumulative_queue_time_calculator=MagicMock(),
+        return_to_testing_calculator=MagicMock(),
+    )
     result = service.get_throughput()
-    assert isinstance(result, dict)
-    assert all(isinstance(k, str) for k in result.keys())
-    assert all(isinstance(v, int) for v in result.values())
+    assert result == {"2024W01": 5}
+    throughput_calculator.calculate.assert_called_once()
 
 
-def test_metricsservice_get_cumulative_queue_time(dummy_repo):
-    service = MetricsService(dummy_repo)
-    result = service.get_cumulative_queue_time()
+def test_metricsservice_get_cumulative_queue_time():
     import pandas as pd
 
-    assert isinstance(result, pd.DataFrame)
-    assert set(result.columns) == {"status", "median_hours", "count"}
+    cumulative_queue_time_calculator = MagicMock()
+    df = pd.DataFrame({"status": ["To Do"], "median_hours": [10], "count": [100]})
+    cumulative_queue_time_calculator.calculate.return_value = df
+    service = MetricsService(
+        cycle_time_calculator=MagicMock(),
+        lead_time_calculator=MagicMock(),
+        queue_time_calculator=MagicMock(),
+        throughput_calculator=MagicMock(),
+        cumulative_queue_time_calculator=cumulative_queue_time_calculator,
+        return_to_testing_calculator=MagicMock(),
+    )
+    result = service.get_cumulative_queue_time()
+    pd.testing.assert_frame_equal(result, df)
+    cumulative_queue_time_calculator.calculate.assert_called_once()
 
 
-def test_metricsservice_get_return_to_testing(dummy_repo):
-    service = MetricsService(dummy_repo)
+def test_metricsservice_get_return_to_testing():
+    return_to_testing_calculator = MagicMock()
+    return_to_testing_calculator.calculate.return_value = [2, 3]
+    service = MetricsService(
+        cycle_time_calculator=MagicMock(),
+        lead_time_calculator=MagicMock(),
+        queue_time_calculator=MagicMock(),
+        throughput_calculator=MagicMock(),
+        cumulative_queue_time_calculator=MagicMock(),
+        return_to_testing_calculator=return_to_testing_calculator,
+    )
     result = service.get_return_to_testing()
-    assert isinstance(result, list)
+    assert result == [2, 3]
+    return_to_testing_calculator.calculate.assert_called_once()

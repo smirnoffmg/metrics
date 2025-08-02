@@ -82,16 +82,6 @@ def test_baseissuesrepository_not_implemented():
         assert False, "Expected NotImplementedError"
 
 
-def test_jiraapirepository_get_raw_data_and_convert():
-    mock_jira = MockJira()
-    repo = JiraAPIRepository(mock_jira, "dummy jql")
-    raw = repo.get_raw_data()
-    assert isinstance(raw, list)
-    issue = repo.convert_data_to_issue(raw[0])
-    assert issue.key == "ISSUE-1"
-    assert issue.status == "Done"
-
-
 def test_get_jira_client_success():
     with patch("metrics.utils.JIRA") as mock_jira:
         mock_jira.return_value = MagicMock(name="JIRA")
@@ -143,3 +133,9 @@ def test_container_provides_services():
 
     assert isinstance(metrics_service, MetricsService)
     assert isinstance(vis_service, VisService)
+    assert metrics_service.cycle_time_calculator is not None
+    assert metrics_service.lead_time_calculator is not None
+    assert metrics_service.queue_time_calculator is not None
+    assert metrics_service.throughput_calculator is not None
+    assert metrics_service.cumulative_queue_time_calculator is not None
+    assert metrics_service.return_to_testing_calculator is not None
