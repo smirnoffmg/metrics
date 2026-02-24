@@ -1,4 +1,8 @@
-import os
+"""Tests for VisService chart rendering."""
+
+from __future__ import annotations
+
+from pathlib import Path
 
 import pandas as pd
 
@@ -9,17 +13,19 @@ def test_visservice_vis_df_creates_file(temp_png_file):
     vis = VisService()
     data = {"a": 1, "b": 2, "c": 3}
     vis.vis_df(temp_png_file, data, x_label="x", y_label="y")
-    assert os.path.exists(temp_png_file)
+    assert Path(temp_png_file).exists()
 
 
 def test_visservice_vis_array_like_creates_file(temp_png_file):
     vis = VisService()
     arr = [1, 2, 2, 3, 3, 3]
     vis.vis_array_like(temp_png_file, arr, x_label="x", y_label="y")
-    assert os.path.exists(temp_png_file)
+    assert Path(temp_png_file).exists()
 
 
-def test_visservice_vis_cumulative_queue_time_creates_file(temp_png_file):
+def test_visservice_vis_cumulative_queue_time_creates_file(
+    temp_png_file,
+):
     vis = VisService()
     df = pd.DataFrame(
         {
@@ -29,4 +35,4 @@ def test_visservice_vis_cumulative_queue_time_creates_file(temp_png_file):
         },
     )
     vis.vis_cumulative_queue_time(temp_png_file, df)
-    assert os.path.exists(temp_png_file)
+    assert Path(temp_png_file).exists()

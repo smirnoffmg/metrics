@@ -1,3 +1,7 @@
+"""Tests for Issue entity properties."""
+
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 
 import pytest
@@ -6,7 +10,7 @@ from metrics.entity import Issue
 from metrics.repository.base import BaseIssuesRepository
 
 
-@pytest.fixture()
+@pytest.fixture
 def test_issue() -> Issue:
     return Issue(
         key="TEST-1",
@@ -19,10 +23,6 @@ def test_issue() -> Issue:
 
 class DummyRepo:
     def all(self):
-        from datetime import datetime, timedelta
-
-        from metrics.entity.issues import Issue
-
         return [
             Issue(
                 key="ISSUE-1",
@@ -49,10 +49,6 @@ class DummyBaseRepo(BaseIssuesRepository):
         ]
 
     def convert_data_to_issue(self, data_item):
-        from datetime import datetime
-
-        from metrics.entity.issues import Issue
-
         return Issue(
             key=data_item["key"],
             status=data_item["fields"]["status"]["name"],
@@ -64,7 +60,7 @@ class MockJira:
     def __init__(self):
         self.called = False
 
-    def search_issues(self, *args, **kwargs):
+    def search_issues(self, *_args, **_kwargs):
         self.called = True
         return {
             "total": 1,

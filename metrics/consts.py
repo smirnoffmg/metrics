@@ -1,3 +1,5 @@
+"""Constants for metrics calculations."""
+
 from typing import Final
 
 ONE_HOUR: Final[int] = 60 * 60

@@ -1,3 +1,7 @@
+"""Tests for the CLI entrypoint."""
+
+from __future__ import annotations
+
 from click.testing import CliRunner
 
 from metrics.__main__ import cli

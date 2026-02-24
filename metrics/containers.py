@@ -1,3 +1,7 @@
+"""Dependency injection container for the metrics application."""
+
+from __future__ import annotations
+
 import logging.config
 
 from dependency_injector import containers, providers
@@ -18,6 +22,8 @@ from .utils import get_jira_client
 
 
 class Container(containers.DeclarativeContainer):
+    """Wires together repositories, calculators, and services."""
+
     logging = providers.Resource(
         logging.config.fileConfig,
         fname="metrics/logging.ini",
@@ -31,7 +37,11 @@ class Container(containers.DeclarativeContainer):
         config.jira.token,
     )
 
-    jira_api_repo = providers.Factory(JiraAPIRepository, jira, config.jira.jql)
+    jira_api_repo = providers.Factory(
+        JiraAPIRepository,
+        jira,
+        config.jira.jql,
+    )
     jira_data_converter = providers.Factory(JiraDataConverter)
 
     repo = providers.Factory(
@@ -42,13 +52,21 @@ class Container(containers.DeclarativeContainer):
 
     cycle_time_calculator = providers.Factory(CycleTimeCalculator, repo)
     lead_time_calculator = providers.Factory(LeadTimeCalculator, repo)
-    queue_time_calculator = providers.Factory(QueueTimeCalculator, repo)
-    throughput_calculator = providers.Factory(ThroughputCalculator, repo)
+    queue_time_calculator = providers.Factory(
+        QueueTimeCalculator,
+        repo,
+    )
+    throughput_calculator = providers.Factory(
+        ThroughputCalculator,
+        repo,
+    )
     cumulative_queue_time_calculator = providers.Factory(
-        CumulativeQueueTimeCalculator, repo
+        CumulativeQueueTimeCalculator,
+        repo,
     )
     return_to_testing_calculator = providers.Factory(
-        ReturnToTestingCalculator, repo
+        ReturnToTestingCalculator,
+        repo,
     )
 
     metrics_service = providers.Factory(

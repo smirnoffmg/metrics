@@ -1,3 +1,7 @@
+"""Tests for Jira repository implementations."""
+
+from __future__ import annotations
+
 from unittest.mock import MagicMock
 
 from metrics.repository.converter import JiraDataConverter
@@ -6,11 +10,13 @@ from metrics.repository.jira import JiraAPIRepository, JiraIssuesRepository
 
 def test_jiraapirepository_get_raw_data():
     mock_jira = MagicMock()
-    mock_jira.search_issues.return_value = {"issues": [{"key": "ISSUE-1"}]}
+    mock_jira.search_issues.return_value = {
+        "issues": [{"key": "ISSUE-1"}],
+    }
     repo = JiraAPIRepository(mock_jira, "dummy jql")
     with MagicMock() as mock_get_issues:
         repo.get_raw_data = mock_get_issues
-        result = repo.get_raw_data()
+        repo.get_raw_data()
         mock_get_issues.assert_called_once()
 
 
@@ -24,7 +30,7 @@ def test_jiraissuesrepository_all():
                 "status": {"name": "Done"},
             },
             "changelog": {"histories": []},
-        }
+        },
     ]
     mock_converter = JiraDataConverter()
     repo = JiraIssuesRepository(mock_api_repo, mock_converter)

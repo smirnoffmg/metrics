@@ -1,9 +1,18 @@
+"""Issue entity representing a Jira ticket with timing data."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from datetime import datetime, timedelta
 
 
 @dataclass
 class Issue:
+    """A Jira issue with status history and timing metadata."""
+
     key: str
     status: str
 
@@ -18,17 +27,12 @@ class Issue:
 
     @property
     def was_done(self) -> bool:
-        """Checks if the issue was in a done status at some point.
-
-        Returns
-        -------
-            bool: True if the issue was done, False otherwise.
-
-        """
+        """Check if the issue reached a done status at some point."""
         return self.last_finish_status_at is not None
 
     @property
     def lead_time(self) -> timedelta | None:
+        """Time from creation to completion, or None if not done."""
         if not self.last_finish_status_at:
             return None
 
@@ -36,6 +40,7 @@ class Issue:
 
     @property
     def cycle_time(self) -> timedelta | None:
+        """Time from first status change to completion, or None."""
         if self.first_status_change_at and self.last_finish_status_at:
             return self.last_finish_status_at - self.first_status_change_at
         return None

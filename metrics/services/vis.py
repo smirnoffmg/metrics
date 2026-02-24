@@ -1,3 +1,7 @@
+"""Visualization service for rendering metric charts."""
+
+from __future__ import annotations
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -6,6 +10,8 @@ from .base import BaseService
 
 
 class VisService(BaseService):
+    """Renders and saves metric charts as PNG images."""
+
     def vis_df(
         self,
         filename: str,
@@ -13,6 +19,7 @@ class VisService(BaseService):
         x_label: str = "x_label",
         y_label: str = "y_label",
     ) -> None:
+        """Render a regression plot from a dict and save to file."""
         df = pd.DataFrame(
             {
                 "x": range(1, len(data) + 1),
@@ -36,7 +43,10 @@ class VisService(BaseService):
         try:
             plt.savefig(filename)
         except Exception as err:
-            self.logger.exception(f"Failed to save figure to {filename}")
+            self.logger.exception(
+                "Failed to save figure to %s",
+                filename,
+            )
             msg = f"Failed to save figure to {filename}: {err}"
             raise RuntimeError(msg) from err
         finally:
@@ -47,9 +57,9 @@ class VisService(BaseService):
         filename: str,
         df: pd.DataFrame,
     ) -> None:
+        """Render a horizontal bar chart of cumulative queue time."""
         _, ax = plt.subplots()
 
-        # sort the DataFrame by 'median_hours' in descending order
         df = df.sort_values(by="median_hours", ascending=False)
 
         hbars = ax.barh(
@@ -58,13 +68,16 @@ class VisService(BaseService):
         )
         ax.set_yticks(
             df["status"],
-            labels=df["status"] + " (" + df["count"].astype(str) + ")",
+            labels=(df["status"] + " (" + df["count"].astype(str) + ")"),
         )
 
         ax.invert_yaxis()
-        # Set labels - add number to the end of each bar
 
-        ax.bar_label(hbars, fmt="%.2f", labels=df["median_hours"].astype(str) + "h")
+        ax.bar_label(
+            hbars,
+            fmt="%.2f",
+            labels=df["median_hours"].astype(str) + "h",
+        )
         ax.set_xlim(right=max(df["median_hours"]) * 1.3)
 
         plt.xlabel("Median hours")
@@ -79,7 +92,10 @@ class VisService(BaseService):
         try:
             plt.savefig(filename)
         except Exception as err:
-            self.logger.exception(f"Failed to save figure to {filename}")
+            self.logger.exception(
+                "Failed to save figure to %s",
+                filename,
+            )
             msg = f"Failed to save figure to {filename}: {err}"
             raise RuntimeError(msg) from err
         finally:
@@ -92,7 +108,8 @@ class VisService(BaseService):
         x_label: str = "x_label",
         y_label: str = "y_label",
     ) -> None:
-        plt.grid(True)
+        """Render a histogram from an array and save to file."""
+        plt.grid(visible=True)
 
         counts, _, bars = plt.hist(
             arr,
@@ -112,7 +129,10 @@ class VisService(BaseService):
         try:
             plt.savefig(filename)
         except Exception as err:
-            self.logger.exception(f"Failed to save figure to {filename}")
+            self.logger.exception(
+                "Failed to save figure to %s",
+                filename,
+            )
             msg = f"Failed to save figure to {filename}: {err}"
             raise RuntimeError(msg) from err
         finally:

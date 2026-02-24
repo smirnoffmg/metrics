@@ -1,53 +1,49 @@
-[tool.poetry]
+[project]
 name = "metrics"
 version = "0.1.0"
 description = ""
-authors = ["Maksim Smirnov <smirnoffmg@gmail.com>"]
 readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Maksim Smirnov", email = "smirnoffmg@gmail.com" }]
+dependencies = [
+    "numpy>=1.26.3",
+    "jira>=3.6.0",
+    "python-dateutil>=2.8.2",
+    "matplotlib>=3.8.2",
+    "pandas>=2.1.4",
+    "scipy>=1.11.4",
+    "seaborn>=0.13.1",
+    "python-decouple>=3.8",
+    "pydantic-settings>=2.1.0",
+    "click>=8.1.7",
+    "dependency-injector>=4.41.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-numpy = "^1.26.3"
-jira = "^3.6.0"
-python-dateutil = "^2.8.2"
-matplotlib = "^3.8.2"
-pandas = "^2.1.4"
-scipy = "^1.11.4"
-seaborn = "^0.13.1"
-python-decouple = "^3.8"
-pydantic-settings = "^2.1.0"
-click = "^8.1.7"
-dependency-injector = "^4.41.0"
-
-
-[tool.poetry.group.dev.dependencies]
-black = "^23.12.1"
-ruff = "^0.1.11"
-isort = "^5.13.2"
-ipython = "^8.19.0"
-mypy = "^1.8.0"
-pytest = "^7.4.4"
-detect-secrets = "^1.4.0"
-pytest-cov = "^4.1.0"
-types-python-dateutil = "^2.9.0.20241003"
+[dependency-groups]
+dev = [
+    "ruff>=0.1.11",
+    "ipython>=8.19.0",
+    "mypy>=1.8.0",
+    "pytest>=7.4.4",
+    "detect-secrets>=1.4.0",
+    "pytest-cov>=4.1.0",
+    "types-python-dateutil>=2.9.0.20241003",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 
 [tool.ruff]
-target-version = "py311"
 line-length = 88
 
 [tool.ruff.lint]
 select = ["ALL"]
-ignore = ["G004", "PD901", "DTZ001", "S101"]
-per-file-ignores = { "tests/*.py" = [
-    "ANN",
-    "D",
+ignore = ["G004", "DTZ001", "S101", "D203", "D213", "COM812"]
 
-] } # Ignore missing return type for public function in tests
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["ANN", "D"]
 
 [tool.ruff.format]
 # Use Ruff as the formatter

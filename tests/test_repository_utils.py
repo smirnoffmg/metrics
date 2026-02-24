@@ -1,10 +1,18 @@
+"""Tests for repository utilities and container wiring."""
+
+from __future__ import annotations
+
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
 from jira.exceptions import JIRAError
 
 from metrics.containers import Container
+from metrics.entity.issues import Issue
 from metrics.repository.base import BaseIssuesRepository
-from metrics.repository.jira import JiraAPIRepository
+from metrics.services.metrics import MetricsService
+from metrics.services.vis import VisService
 from metrics.utils import get_jira_client
 
 
@@ -22,10 +30,6 @@ class DummyBaseRepo(BaseIssuesRepository):
         ]
 
     def convert_data_to_issue(self, data_item):
-        from datetime import datetime
-
-        from metrics.entity.issues import Issue
-
         return Issue(
             key=data_item["key"],
             status=data_item["fields"]["status"]["name"],
@@ -37,7 +41,7 @@ class MockJira:
     def __init__(self):
         self.called = False
 
-    def search_issues(self, *args, **kwargs):
+    def search_issues(self, *_args, **_kwargs):
         self.called = True
         return {
             "total": 1,
@@ -68,18 +72,10 @@ def test_baseissuesrepository_not_implemented():
             return []
 
     base = DummyBase()
-    try:
+    with pytest.raises(NotImplementedError):
         base.get_raw_data()
-    except NotImplementedError:
-        pass
-    else:
-        assert False, "Expected NotImplementedError"
-    try:
+    with pytest.raises(NotImplementedError):
         base.convert_data_to_issue({})
-    except NotImplementedError:
-        pass
-    else:
-        assert False, "Expected NotImplementedError"
 
 
 def test_get_jira_client_success():
@@ -93,24 +89,16 @@ def test_get_jira_client_failure():
     get_jira_client.cache_clear()
     with patch("metrics.utils.JIRA") as mock_jira:
         mock_jira.side_effect = JIRAError("fail connect")
-        try:
+        with pytest.raises(RuntimeError, match="fail connect"):
             get_jira_client("http://example.com", "token")
-        except RuntimeError as e:
-            assert "fail connect" in str(e)
-        else:
-            assert False, "Expected RuntimeError"
 
 
 def test_get_jira_client_generic_exception():
     get_jira_client.cache_clear()
     with patch("metrics.utils.JIRA") as mock_jira:
         mock_jira.side_effect = Exception("unexpected fail")
-        try:
+        with pytest.raises(Exception, match="unexpected fail"):
             get_jira_client("http://example.com", "token")
-        except Exception as e:
-            assert "unexpected fail" in str(e)
-        else:
-            assert False, "Expected Exception"
 
 
 def test_container_provides_services():
@@ -128,8 +116,6 @@ def test_container_provides_services():
     container.init_resources()
     metrics_service = container.metrics_service()
     vis_service = container.vis_service()
-    from metrics.services.metrics import MetricsService
-    from metrics.services.vis import VisService
 
     assert isinstance(metrics_service, MetricsService)
     assert isinstance(vis_service, VisService)

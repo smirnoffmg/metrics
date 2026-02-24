@@ -1,3 +1,9 @@
+"""Tests for metric calculators."""
+
+from __future__ import annotations
+
+import pandas as pd
+
 from metrics.services.calculator import (
     CumulativeQueueTimeCalculator,
     CycleTimeCalculator,
@@ -33,13 +39,11 @@ def test_throughput_calculator(dummy_repo):
     calculator = ThroughputCalculator(dummy_repo)
     result = calculator.calculate()
     assert isinstance(result, dict)
-    assert all(isinstance(k, str) for k in result.keys())
+    assert all(isinstance(k, str) for k in result)
     assert all(isinstance(v, int) for v in result.values())
 
 
 def test_cumulative_queue_time_calculator(dummy_repo):
-    import pandas as pd
-
     calculator = CumulativeQueueTimeCalculator(dummy_repo)
     result = calculator.calculate()
     assert isinstance(result, pd.DataFrame)

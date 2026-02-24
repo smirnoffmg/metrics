@@ -1,3 +1,7 @@
+"""Utility functions for Jira client creation."""
+
+from __future__ import annotations
+
 import logging
 from functools import cache
 
@@ -9,20 +13,19 @@ logger = logging.getLogger(__name__)
 
 @cache
 def get_jira_client(server: str, token: str) -> JIRA:
-    """Create and return a JIRA client object.
+    """Create and return a cached JIRA client.
 
-    Uses @cache to memoize the result of this function, so that the same
-    client object is returned every time this function is called with the same
-    arguments.
+    Uses @cache to memoize the result so the same client object is
+    returned for identical (server, token) arguments.
 
     Args:
     ----
-        server (str): The URL of the JIRA server.
-        token (str): The authentication token for the JIRA server.
+        server: The URL of the JIRA server.
+        token: The authentication token for the JIRA server.
 
     Returns:
     -------
-        JIRA: A JIRA client object.
+        A JIRA client object.
 
     Raises:
     ------
@@ -32,7 +35,9 @@ def get_jira_client(server: str, token: str) -> JIRA:
     try:
         return JIRA(server=server, token_auth=token)
     except JIRAError as err:
-        logger.exception("Failed to authenticate or connect to Jira")
+        logger.exception(
+            "Failed to authenticate or connect to Jira",
+        )
         msg = f"Failed to authenticate or connect to Jira: {err}"
         raise RuntimeError(msg) from err
     except Exception:

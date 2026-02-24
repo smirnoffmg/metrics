@@ -1,9 +1,16 @@
+"""Utilities for fetching issues from the Jira API."""
+
+from __future__ import annotations
+
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from itertools import repeat
+from typing import TYPE_CHECKING
 
-from jira import JIRA
 from jira.exceptions import JIRAError
+
+if TYPE_CHECKING:
+    from jira import JIRA
 
 logger = logging.getLogger(__name__)
 
@@ -13,12 +20,12 @@ def get_issues_total(j: JIRA, jql: str) -> int:
 
     Args:
     ----
-        j (JIRA): An instance of the JIRA client.
-        jql (str): The JQL query to search for issues.
+        j: An instance of the JIRA client.
+        jql: The JQL query to search for issues.
 
     Returns:
     -------
-        int: The total number of issues matching the JQL query.
+        The total number of issues matching the JQL query.
 
     Raises:
     ------
@@ -27,11 +34,6 @@ def get_issues_total(j: JIRA, jql: str) -> int:
     """
     try:
         issues_response = j.search_issues(jql, maxResults=0)
-        if isinstance(issues_response, dict):
-            logger.debug(f"Total {issues_response['total']} issues...")
-            return issues_response["total"]
-        logger.debug(f"Total {issues_response.total} issues...")
-        return issues_response.total
     except JIRAError as err:
         logger.exception("Failed to fetch total issues from Jira")
         msg = f"Failed to fetch total issues from Jira: {err}"
@@ -39,21 +41,35 @@ def get_issues_total(j: JIRA, jql: str) -> int:
     except Exception:
         logger.exception("Unexpected error in get_issues_total")
         raise
+    else:
+        if isinstance(issues_response, dict):
+            logger.debug(
+                "Total %d issues...",
+                issues_response["total"],
+            )
+            return issues_response["total"]
+        logger.debug("Total %d issues...", issues_response.total)
+        return issues_response.total
 
 
-def get_issues_slice(j: JIRA, jql: str, offset: int = 0, limit: int = 50) -> list[dict]:
+def get_issues_slice(
+    j: JIRA,
+    jql: str,
+    offset: int = 0,
+    limit: int = 50,
+) -> list[dict]:
     """Get a slice of issues from JIRA based on the provided JQL query.
 
     Args:
     ----
-        j (JIRA): An instance of the JIRA client.
-        jql (str): The JQL query to filter the issues.
-        offset (int, optional): The starting index of the slice. Defaults to 0.
-        limit (int, optional): The maximum number of issues to retrieve. Defaults to 50.
+        j: An instance of the JIRA client.
+        jql: The JQL query to filter the issues.
+        offset: The starting index of the slice. Defaults to 0.
+        limit: The maximum number of issues to retrieve.
 
     Returns:
     -------
-        list[dict]: A list of dictionaries representing the retrieved issues.
+        A list of dictionaries representing the retrieved issues.
 
     Raises:
     ------
@@ -61,16 +77,17 @@ def get_issues_slice(j: JIRA, jql: str, offset: int = 0, limit: int = 50) -> lis
 
     """
     try:
-        logger.debug(f"Getting issues slices from {offset} to {offset + limit}...")
+        logger.debug(
+            "Getting issues slices from %d to %d...",
+            offset,
+            offset + limit,
+        )
         issues_response = j.search_issues(
             jql,
             startAt=offset,
             maxResults=limit,
             expand="changelog",
         )
-        if isinstance(issues_response, dict):
-            return issues_response["issues"]
-        return list(issues_response)
     except JIRAError as err:
         logger.exception("Failed to fetch issues slice from Jira")
         msg = f"Failed to fetch issues slice from Jira: {err}"
@@ -78,27 +95,30 @@ def get_issues_slice(j: JIRA, jql: str, offset: int = 0, limit: int = 50) -> lis
     except Exception:
         logger.exception("Unexpected error in get_issues_slice")
         raise
+    else:
+        if isinstance(issues_response, dict):
+            return issues_response["issues"]
+        return list(issues_response)
 
 
 def get_issues(j: JIRA, jql: str) -> list[dict]:
-    """Retrieve a list of issues from JIRA based on the provided JQL query.
-    Uses a thread pool to retrieve the issues in parallel.
+    """Retrieve issues from JIRA in parallel using a thread pool.
 
     Args:
     ----
-        j (JIRA): An instance of the JIRA client.
-        jql (str): The JQL query to filter the issues.
+        j: An instance of the JIRA client.
+        jql: The JQL query to filter the issues.
 
     Returns:
     -------
-        list[dict]: A list of dictionaries representing the retrieved issues.
+        A list of dictionaries representing the retrieved issues.
 
     Raises:
     ------
         RuntimeError: If the Jira API call fails.
 
     """
-    result = []
+    result: list[dict] = []
     per_page = 50
     try:
         issues_total = get_issues_total(j, jql)
