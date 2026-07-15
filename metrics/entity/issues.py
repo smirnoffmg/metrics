@@ -9,6 +9,15 @@ if TYPE_CHECKING:
     from datetime import datetime, timedelta
 
 
+@dataclass(frozen=True)
+class StatusTransition:
+    """A single timestamped status change."""
+
+    at: datetime
+    from_status: str | None
+    to_status: str
+
+
 @dataclass
 class Issue:
     """A Jira issue with status history and timing metadata."""
@@ -21,8 +30,10 @@ class Issue:
     last_finish_status_at: datetime | None = None
 
     status_history: list[str] = field(default_factory=list)
+    status_transitions: list[StatusTransition] = field(default_factory=list)
+    handoffs: int = 0
 
-    doers_x_periods: dict[str, timedelta] = field(default_factory=dict)
+    doers_x_periods: dict[str | None, timedelta] = field(default_factory=dict)
     statuses_x_periods: dict[str, timedelta] = field(default_factory=dict)
 
     @property

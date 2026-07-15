@@ -27,6 +27,8 @@ class FakeJira:
     whose items are not subscriptable - modelled here by _NotSubscriptable.
     """
 
+    deploymentType = "Server"  # noqa: N815 - mirrors the jira client attribute
+
     def __init__(self, issues: list[dict]) -> None:
         self.issues = issues
         self.search_calls: list[dict[str, Any]] = []
@@ -43,6 +45,8 @@ class FakeJira:
 
 class FakeCloudJira:
     """Mimics JIRA.enhanced_search_issues nextPageToken pagination."""
+
+    deploymentType = "Cloud"  # noqa: N815 - mirrors the jira client attribute
 
     def __init__(self, issues: list[dict], page_size: int = 2) -> None:
         self.issues = issues

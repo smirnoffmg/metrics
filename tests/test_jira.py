@@ -16,6 +16,18 @@ def test_jiraapirepository_cloud_uses_enhanced_search():
     assert [item["key"] for item in raw] == ["ISSUE-0", "ISSUE-1", "ISSUE-2"]
 
 
+def test_jiraapirepository_autodetects_cloud():
+    fake = FakeCloudJira([make_raw_issue("ISSUE-0")], page_size=50)
+    repo = JiraAPIRepository(fake, "dummy jql", cloud=None)
+    assert [item["key"] for item in repo.get_raw_data()] == ["ISSUE-0"]
+
+
+def test_jiraapirepository_autodetects_server():
+    fake = FakeJira([make_raw_issue("ISSUE-0")])
+    repo = JiraAPIRepository(fake, "dummy jql", cloud=None)
+    assert [item["key"] for item in repo.get_raw_data()] == ["ISSUE-0"]
+
+
 def test_jiraapirepository_get_raw_data():
     fake = FakeJira([make_raw_issue("ISSUE-1"), make_raw_issue("ISSUE-2")])
     repo = JiraAPIRepository(fake, "dummy jql")

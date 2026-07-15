@@ -17,6 +17,7 @@ dependencies = [
     "pydantic-settings>=2.1.0",
     "click>=8.1.7",
     "dependency-injector>=4.41.0",
+    "plotly>=6.9.0",
 ]
 
 [dependency-groups]
@@ -55,6 +56,10 @@ indent-style = "space"
 line-ending = "lf"
 
 [tool.mypy]
+
+[[tool.mypy.overrides]]
+module = ["plotly", "plotly.*"]
+ignore_missing_imports = true
 
 [tool.codespell]
 skip = '*.lock'

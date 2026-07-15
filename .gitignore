@@ -246,3 +246,5 @@ tags
 *.dump
 *.png
 .vscode/
+
+!docs/images/*.png

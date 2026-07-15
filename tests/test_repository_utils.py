@@ -136,6 +136,13 @@ def test_get_jira_client_cloud_uses_basic_auth():
         )
 
 
+def test_get_jira_client_anonymous_sends_no_auth():
+    get_jira_client.cache_clear()
+    with patch("metrics.utils.JIRA") as mock_jira:
+        get_jira_client("https://public.jira", None, None, anonymous=True)
+        mock_jira.assert_called_once_with(server="https://public.jira")
+
+
 def test_get_jira_client_server_uses_token_auth():
     get_jira_client.cache_clear()
     with patch("metrics.utils.JIRA") as mock_jira:
