@@ -11,9 +11,17 @@ from jira.exceptions import JIRAError
 from metrics.containers import Container
 from metrics.entity.issues import Issue
 from metrics.repository.base import BaseIssuesRepository
+from metrics.repository.jira import JiraIssuesRepository
+from metrics.repository.utils import (
+    get_issues,
+    get_issues_cloud,
+    get_issues_slice,
+    get_issues_total,
+)
 from metrics.services.metrics import MetricsService
 from metrics.services.vis import VisService
 from metrics.utils import get_jira_client
+from tests.fakes import FakeCloudJira, FakeJira, make_raw_issue
 
 
 class DummyBaseRepo(BaseIssuesRepository):
@@ -37,25 +45,29 @@ class DummyBaseRepo(BaseIssuesRepository):
         )
 
 
-class MockJira:
-    def __init__(self):
-        self.called = False
+def test_get_issues_total_counts_without_fetching_pages():
+    issue_count = 3
+    fake = FakeJira([make_raw_issue(f"ISSUE-{i}") for i in range(issue_count)])
+    total = get_issues_total(fake, "project=TEST")
+    assert total == issue_count
+    (call,) = fake.search_calls
+    assert call.get("json_result") is True
+    assert call.get("maxResults") == 1
 
-    def search_issues(self, *_args, **_kwargs):
-        self.called = True
-        return {
-            "total": 1,
-            "issues": [
-                {
-                    "key": "ISSUE-1",
-                    "fields": {
-                        "created": "2024-01-01T00:00:00.000+0000",
-                        "status": {"name": "Done"},
-                    },
-                    "changelog": {"histories": []},
-                },
-            ],
-        }
+
+def test_get_issues_slice_returns_raw_dicts():
+    fake = FakeJira([make_raw_issue(f"ISSUE-{i}") for i in range(5)])
+    result = get_issues_slice(fake, "project=TEST", offset=2, limit=2)
+    assert [item["key"] for item in result] == ["ISSUE-2", "ISSUE-3"]
+
+
+def test_get_issues_fetches_all_pages_as_dicts():
+    issue_count = 120
+    issues = [make_raw_issue(f"ISSUE-{i}") for i in range(issue_count)]
+    fake = FakeJira(issues)
+    result = get_issues(fake, "project=TEST")
+    assert len(result) == issue_count
+    assert {item["key"] for item in result} == {issue["key"] for issue in issues}
 
 
 def test_baseissuesrepository_get_and_all():
@@ -99,6 +111,60 @@ def test_get_jira_client_generic_exception():
         mock_jira.side_effect = Exception("unexpected fail")
         with pytest.raises(Exception, match="unexpected fail"):
             get_jira_client("http://example.com", "token")
+
+
+def test_get_issues_cloud_follows_next_page_token():
+    issue_count = 5
+    issues = [make_raw_issue(f"ISSUE-{i}") for i in range(issue_count)]
+    fake = FakeCloudJira(issues, page_size=2)
+    result = get_issues_cloud(fake, "project=TEST")
+    expected_keys = [f"ISSUE-{i}" for i in range(issue_count)]
+    assert [item["key"] for item in result] == expected_keys
+    expected_pages = 3
+    assert len(fake.search_calls) == expected_pages
+    assert fake.search_calls[0].get("nextPageToken") is None
+    assert all(call.get("json_result") is True for call in fake.search_calls)
+
+
+def test_get_jira_client_cloud_uses_basic_auth():
+    get_jira_client.cache_clear()
+    with patch("metrics.utils.JIRA") as mock_jira:
+        get_jira_client("https://x.atlassian.net", "token", "me@example.com")
+        mock_jira.assert_called_once_with(
+            server="https://x.atlassian.net",
+            basic_auth=("me@example.com", "token"),
+        )
+
+
+def test_get_jira_client_server_uses_token_auth():
+    get_jira_client.cache_clear()
+    with patch("metrics.utils.JIRA") as mock_jira:
+        get_jira_client("https://jira.corp", "token")
+        mock_jira.assert_called_once_with(
+            server="https://jira.corp",
+            token_auth="token",  # noqa: S106
+        )
+
+
+def test_container_resolves_metrics_service_with_single_fetch():
+    with patch.object(
+        JiraIssuesRepository,
+        "get_raw_data",
+        return_value=[],
+    ) as mock_fetch:
+        container = Container()
+        container.jira.override(MagicMock(name="JIRA"))
+        container.config.from_dict(
+            {
+                "jira": {
+                    "server": "http://example.com",
+                    "token": "dummy-token",
+                    "jql": "project=TEST",
+                },
+            },
+        )
+        container.metrics_service()
+        assert mock_fetch.call_count == 1
 
 
 def test_container_provides_services():

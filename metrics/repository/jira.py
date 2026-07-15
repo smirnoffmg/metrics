@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .base import BaseIssuesRepository
-from .utils import get_issues
+from .utils import get_issues, get_issues_cloud
 
 if TYPE_CHECKING:
     from jira import JIRA
@@ -18,13 +18,16 @@ if TYPE_CHECKING:
 class JiraAPIRepository:
     """Thin wrapper around the Jira API for fetching raw issue data."""
 
-    def __init__(self, jira: JIRA, jql: str) -> None:
-        """Initialize with a JIRA client and JQL query."""
+    def __init__(self, jira: JIRA, jql: str, *, cloud: bool = False) -> None:
+        """Initialize with a JIRA client, JQL query, and deployment kind."""
         self.jira = jira
         self.jql = jql
+        self.cloud = cloud
 
     def get_raw_data(self) -> list[dict]:
         """Fetch raw issue dicts from the Jira API."""
+        if self.cloud:
+            return get_issues_cloud(self.jira, self.jql)
         return get_issues(self.jira, self.jql)
 
 

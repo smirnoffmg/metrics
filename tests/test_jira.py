@@ -6,18 +6,22 @@ from unittest.mock import MagicMock
 
 from metrics.repository.converter import JiraDataConverter
 from metrics.repository.jira import JiraAPIRepository, JiraIssuesRepository
+from tests.fakes import FakeCloudJira, FakeJira, make_raw_issue
+
+
+def test_jiraapirepository_cloud_uses_enhanced_search():
+    fake = FakeCloudJira([make_raw_issue(f"ISSUE-{i}") for i in range(3)], page_size=2)
+    repo = JiraAPIRepository(fake, "dummy jql", cloud=True)
+    raw = repo.get_raw_data()
+    assert [item["key"] for item in raw] == ["ISSUE-0", "ISSUE-1", "ISSUE-2"]
 
 
 def test_jiraapirepository_get_raw_data():
-    mock_jira = MagicMock()
-    mock_jira.search_issues.return_value = {
-        "issues": [{"key": "ISSUE-1"}],
-    }
-    repo = JiraAPIRepository(mock_jira, "dummy jql")
-    with MagicMock() as mock_get_issues:
-        repo.get_raw_data = mock_get_issues
-        repo.get_raw_data()
-        mock_get_issues.assert_called_once()
+    fake = FakeJira([make_raw_issue("ISSUE-1"), make_raw_issue("ISSUE-2")])
+    repo = JiraAPIRepository(fake, "dummy jql")
+    raw = repo.get_raw_data()
+    assert [item["key"] for item in raw] == ["ISSUE-1", "ISSUE-2"]
+    assert all(isinstance(item, dict) for item in raw)
 
 
 def test_jiraissuesrepository_all():

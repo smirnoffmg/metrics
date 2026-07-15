@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging.config
+from pathlib import Path
 
 from dependency_injector import containers, providers
 
@@ -26,7 +27,7 @@ class Container(containers.DeclarativeContainer):
 
     logging = providers.Resource(
         logging.config.fileConfig,
-        fname="metrics/logging.ini",
+        fname=str(Path(__file__).parent / "logging.ini"),
     )
 
     config = providers.Configuration()
@@ -35,16 +36,18 @@ class Container(containers.DeclarativeContainer):
         get_jira_client,
         config.jira.server,
         config.jira.token,
+        config.jira.email,
     )
 
     jira_api_repo = providers.Factory(
         JiraAPIRepository,
         jira,
         config.jira.jql,
+        cloud=config.jira.cloud,
     )
     jira_data_converter = providers.Factory(JiraDataConverter)
 
-    repo = providers.Factory(
+    repo = providers.Singleton(
         JiraIssuesRepository,
         api_repo=jira_api_repo,
         converter=jira_data_converter,

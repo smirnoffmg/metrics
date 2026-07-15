@@ -12,16 +12,18 @@ logger = logging.getLogger(__name__)
 
 
 @cache
-def get_jira_client(server: str, token: str) -> JIRA:
+def get_jira_client(server: str, token: str, email: str | None = None) -> JIRA:
     """Create and return a cached JIRA client.
 
     Uses @cache to memoize the result so the same client object is
-    returned for identical (server, token) arguments.
+    returned for identical (server, token, email) arguments.
 
     Args:
     ----
         server: The URL of the JIRA server.
         token: The authentication token for the JIRA server.
+        email: Account email for Jira Cloud basic auth. When omitted,
+            the token is used as a Server/Data Center PAT.
 
     Returns:
     -------
@@ -33,6 +35,8 @@ def get_jira_client(server: str, token: str) -> JIRA:
 
     """
     try:
+        if email:
+            return JIRA(server=server, basic_auth=(email, token))
         return JIRA(server=server, token_auth=token)
     except JIRAError as err:
         logger.exception(

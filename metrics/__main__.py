@@ -61,20 +61,20 @@ def get_env_config() -> dict[str, str | None]:
         "server": os.environ.get("JIRA_SERVER"),
         "token": os.environ.get("JIRA_TOKEN"),
         "jql": os.environ.get("JIRA_JQL"),
+        "email": os.environ.get("JIRA_EMAIL"),
     }
 
 
 def validate_config(cfg: dict[str, str | None]) -> list[str]:
     """Validate required Jira configuration fields."""
     errors = []
-    if not cfg.get("server"):
+    server = cfg.get("server")
+    if not server:
         errors.append(
             "Jira server URL is missing."
             " Set --jira-server, JIRA_SERVER, or config file.",
         )
-    elif not (
-        cfg["server"].startswith("http://") or cfg["server"].startswith("https://")
-    ):
+    elif not server.startswith(("http://", "https://")):
         errors.append(
             "Jira server URL must start with http:// or https://.",
         )
@@ -119,11 +119,18 @@ def validate_config(cfg: dict[str, str | None]) -> list[str]:
     envvar="JIRA_JQL",
     help="Jira JQL query for issues (e.g., 'project=MYPROJ').",
 )
+@click.option(
+    "--jira-email",
+    envvar="JIRA_EMAIL",
+    help="Account email; enables Jira Cloud mode (basic auth with API token)."
+    " Omit for Server/Data Center with a personal access token.",
+)
 def cli(
     config: str | None,
     jira_server: str | None,
     jira_token: str | None,
     jira_jql: str | None,
+    jira_email: str | None,
 ) -> None:
     """Analyze and visualize Jira issue metrics."""
     logger = logging.getLogger(__name__)
@@ -131,6 +138,7 @@ def cli(
         "server": None,
         "token": None,
         "jql": None,
+        "email": None,
     }
     if config:
         try:
@@ -140,6 +148,7 @@ def cli(
                 "server": jira_section.get("server"),
                 "token": jira_section.get("token"),
                 "jql": jira_section.get("jql"),
+                "email": jira_section.get("email"),
             }
         except (FileNotFoundError, ImportError, ValueError) as e:
             click.echo(f"Error loading config file: {e}", err=True)
@@ -149,6 +158,7 @@ def cli(
         "server": jira_server,
         "token": jira_token,
         "jql": jira_jql,
+        "email": jira_email,
     }
     cfg = merge_config(file_cfg, env_cfg, cli_cfg)
     errors = validate_config(cfg)
@@ -164,6 +174,8 @@ def cli(
                     "server": cfg["server"],
                     "token": cfg["token"],
                     "jql": cfg["jql"],
+                    "email": cfg.get("email"),
+                    "cloud": bool(cfg.get("email")),
                 },
             },
         )
@@ -200,8 +212,8 @@ def calculate_metrics(
     vis_service.vis_array_like(
         f"{output_dir}/return_to_testing.png",
         return_to_testing,
-        x_label="x",
-        y_label="y",
+        x_label="returns to testing",
+        y_label="number of issues",
     )
     vis_service.vis_array_like(
         f"{output_dir}/cycle_time.png",

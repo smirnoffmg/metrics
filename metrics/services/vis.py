@@ -5,12 +5,18 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from matplotlib.container import BarContainer
 
 from .base import BaseService
 
 
 class VisService(BaseService):
     """Renders and saves metric charts as PNG images."""
+
+    def __init__(self) -> None:
+        """Apply the seaborn theme once for all charts."""
+        sns.set_theme()
+        super().__init__()
 
     def vis_df(
         self,
@@ -26,8 +32,6 @@ class VisService(BaseService):
                 "y": list(data.values()),
             },
         )
-
-        sns.set_theme()
 
         sns.regplot(
             data=df,
@@ -119,7 +123,8 @@ class VisService(BaseService):
             label="Count",
         )
 
-        plt.bar_label(bars, labels=counts, label_type="edge")
+        if isinstance(bars, BarContainer):
+            plt.bar_label(bars, labels=counts, label_type="edge")
 
         plt.xlabel(x_label)
         plt.ylabel(y_label)

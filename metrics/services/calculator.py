@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -106,13 +107,24 @@ class ThroughputCalculator(MetricCalculator):
     """Calculate weekly throughput of completed issues."""
 
     def calculate(self) -> dict[str, int]:
-        """Calculate number of issues completed per week."""
-        tmp: dict[str, int] = defaultdict(int)
+        """Calculate issues completed per ISO week, gap weeks zero-filled."""
+        counts: dict[str, int] = defaultdict(int)
+        finish_dates = []
         for issue in self.repo.all():
             if issue.last_finish_status_at:
-                key = issue.last_finish_status_at.strftime("%YW%V")
-                tmp[key] += 1
-        return dict(tmp)
+                counts[issue.last_finish_status_at.strftime("%GW%V")] += 1
+                finish_dates.append(issue.last_finish_status_at.date())
+        if not counts:
+            return {}
+
+        week = date.fromisocalendar(*min(finish_dates).isocalendar()[:2], 1)
+        last_week = date.fromisocalendar(*max(finish_dates).isocalendar()[:2], 1)
+        result: dict[str, int] = {}
+        while week <= last_week:
+            key = week.strftime("%GW%V")
+            result[key] = counts.get(key, 0)
+            week += timedelta(weeks=1)
+        return result
 
 
 class CumulativeQueueTimeCalculator(MetricCalculator):

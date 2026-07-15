@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,10 +20,10 @@ class Issue:
     first_status_change_at: datetime | None = None
     last_finish_status_at: datetime | None = None
 
-    status_history: list[str] | None = None
+    status_history: list[str] = field(default_factory=list)
 
-    doers_x_periods: dict[str, timedelta] | None = None
-    statuses_x_periods: dict[str, timedelta] | None = None
+    doers_x_periods: dict[str, timedelta] = field(default_factory=dict)
+    statuses_x_periods: dict[str, timedelta] = field(default_factory=dict)
 
     @property
     def was_done(self) -> bool:
