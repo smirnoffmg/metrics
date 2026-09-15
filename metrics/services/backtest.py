@@ -200,6 +200,19 @@ def choose_window(
     return default
 
 
+def judged_summary(
+    summaries: Sequence[BacktestSummary],
+    min_independent: int = MIN_INDEPENDENT_OUTCOMES,
+) -> BacktestSummary | None:
+    """Pick the longest horizon enough independent outcomes judge, else the longest.
+
+    The forecast's own horizon is usually too long for a verdict, while a
+    shorter one can already show that its promises fail.
+    """
+    judged = [s for s in summaries if s.independent >= min_independent]
+    return max(judged or summaries, key=lambda s: s.horizon, default=None)
+
+
 def summarize_backtests(results: Sequence[Backtest]) -> BacktestSummary | None:
     """Share of 85% claims that held, distance from honest u values, mean CRPS."""
     if not results:

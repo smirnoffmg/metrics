@@ -16,6 +16,7 @@ from metrics.services.backtest import (
     bootstrap_totals,
     choose_window,
     crps,
+    judged_summary,
     kolmogorov_distance,
     probability_integral,
     summarize_backtests,
@@ -248,3 +249,21 @@ def test_choose_window_prefers_the_shortest_of_windows_scoring_about_the_same():
         52: [_scored(8, 12, 102.1)],
     }
     assert choose_window(by_window, default=12, min_independent=10) == 26  # noqa: PLR2004
+
+
+def test_judged_summary_is_the_longest_horizon_with_enough_evidence():
+    summaries = [_scored(4, 24, 22.9), _scored(8, 12, 48.6), _scored(41, 2, 398.6)]
+    judged = judged_summary(summaries, min_independent=10)
+    assert judged is not None
+    assert judged.horizon == 8  # noqa: PLR2004
+
+
+def test_judged_summary_falls_back_to_the_longest_horizon():
+    summaries = [_scored(4, 6, 22.9), _scored(30, 1, 398.6)]
+    judged = judged_summary(summaries, min_independent=10)
+    assert judged is not None
+    assert judged.horizon == 30  # noqa: PLR2004
+
+
+def test_judged_summary_of_nothing_is_none():
+    assert judged_summary([]) is None

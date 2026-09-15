@@ -56,6 +56,7 @@ from metrics.services.backtest import (
     backtest_windows,
     bootstrap_totals,
     choose_window,
+    judged_summary,
     summarize_backtests,
 )
 from metrics.services.calculator import (
@@ -768,13 +769,14 @@ def _report_backtest(  # noqa: PLR0913
             f" Kolmogorov distance {summary.kolmogorov:.2f}",
         )
     tables = {w: list(s.values()) for w, s in by_window.items()}
-    tile = backtest_tile(summaries.get(horizon))
     if horizon not in summaries:
         click.echo(f"Backtest: too little history for {horizon}-week forecasts")
-        return tile, tables, None
+    judged = judged_summary(list(summaries.values()))
+    if judged is None:
+        return backtest_tile(None), tables, None
     chart = output_dir / "forecast_backtest.png"
-    vis_service.vis_backtest(str(chart), runs[window], summaries, horizon)
-    return tile, tables, chart
+    vis_service.vis_backtest(str(chart), runs[window], summaries, judged.horizon)
+    return backtest_tile(judged), tables, chart
 
 
 def _report_delivery(  # noqa: PLR0913
