@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 from .base import BaseIssuesRepository
+from .rewind import rewind_issue
 from .snapshot import Snapshot, current_status_categories, save_snapshot
 from .utils import get_issues, get_issues_cloud, get_status_categories
 
@@ -113,6 +114,14 @@ class JiraIssuesRepository(BaseIssuesRepository):
     def forecast_issues(self) -> list[Issue]:
         """Convert the issues the snapshot's forecast query named."""
         return [self._convert(item) for item in self.snapshot.forecast_issues]
+
+    def issues_at(self, at: datetime) -> list[Issue]:
+        """Convert the snapshot's issues as Jira showed them at an earlier moment."""
+        return [
+            self._convert(rewound)
+            for item in self.snapshot.issues
+            if (rewound := rewind_issue(item, at)) is not None
+        ]
 
     def _convert(self, data_item: dict) -> Issue:
         return self.converter.convert_data_to_issue(data_item, self.categories)

@@ -8,7 +8,7 @@ See how work really flows through your team - straight from Jira, in one command
 **Metrics** pulls your issues and turns them into clear charts plus a single shareable report:
 
 - **How fast are we?** Lead time, cycle time, and a percentile view - "85% of our tickets finish within N days"
-- **When will it be done?** A Monte Carlo forecast for your open backlog
+- **When will it be done?** A Monte Carlo forecast for your open backlog, replayed against the past to show how often its promises came true
 - **Where does work get stuck?** Time per status, aging work-in-progress, and a cumulative flow diagram
 - **Who carries the load?** Time in flight per person and how often tickets change hands
 - **How much do we ship?** Weekly throughput and how often tickets bounce back to testing
@@ -24,6 +24,10 @@ Every chart below comes from real public projects - the [Hibernate ORM](https://
 **Monte Carlo forecast.** 151 open Hibernate issues at the pace of the last 12 finished weeks: half the simulations clear them by 17 November 2026, 85% by 24 November - real dates, not story points.
 
 ![Monte Carlo forecast](docs/images/forecast.png)
+
+**Can you trust that date?** The same forecast, replayed from every Monday of two years of Hibernate with only what Jira showed that day, over the 30 weeks the backlog forecast promised. Only 43 of 68 "85% chance" promises came true. The u-plot on the right tells why: outcomes pile up at both ends, far below or far above every simulation, so the forecast was overconfident. Hibernate closes issues in release batches, and drawing weeks one by one averages those batches away.
+
+![Forecast backtest](docs/images/forecast_backtest.png)
 
 **Weekly throughput.** How many issues get finished each week, with the overall trend. The week still in progress is left out, and quiet weeks count as zero.
 
@@ -102,6 +106,7 @@ Then open `output/report.html`.
 - **QA has its own name?** Same for the rework metric, e.g. `--testing-statuses "In review, QA"` (default: testing).
 - **Curious how much time is real work vs waiting?** Tell it where work happens, e.g. `--active-statuses "In Progress, In Development"` (default: in progress) - that powers the flow-efficiency number in the report: the share of cycle time spent in those statuses, so backlog waiting before work starts doesn't count.
 - **When will this release or epic be done?** Name its issues with `--forecast-jql 'fixVersion = "9.0"'` and get its own forecast next to the backlog's, at the pace of your main query's issues. If the team spends only part of its time on it, say so: `--forecast-focus 0.5` forecasts at half the throughput.
+- **Can you trust the forecast?** The report replays it: from every past Monday it forecasts, from only what Jira showed then, how many issues the team would finish over the forecast's own horizon, and checks what actually happened. "85% forecasts held" says how often the 85% promise came true; a u-plot beside it shows whether past forecasts leaned optimistic, pessimistic or overconfident. Status, resolution and assignee are rolled back through each issue's changelog, so reopened work counts as it stood then. It needs history: fetch a year or more (`resolved >= -365d OR resolution = Unresolved`) for enough past forecasts over a long horizon.
 - **How does delivery look?** Point it at the GitLab project behind the work, `--gitlab-project group/app --gitlab-token <token>`, and the report adds DORA's four keys: deploys per week, change lead time from commit to deploy, change fail rate and recovery time. Each release tag is a deploy (`--deploy-tag-pattern`, default `^v?\d+\.\d+\.\d+$`); a deploy failed when the next one is a hotfix (a merge request labelled `hotfix` or from a `hotfix*` branch), a revert, or a rollback to an earlier tag's commit. Name your coding agents with `--agent-authors srv_bot,agent@example.com` to compare their changes with people's.
 - **Iterating on settings?** Fetch once with `--save-raw issues.json`, then rebuild the report as often as you like with `--from-raw issues.json` - no network, seconds instead of minutes, and the same numbers every time, since time-based metrics are computed as of the fetch.
 - Prefer environment variables or a config file? `uv run python -m metrics --help` shows every option.

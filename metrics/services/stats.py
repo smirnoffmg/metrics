@@ -9,6 +9,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import pandas as pd
 
+    from .backtest import BacktestSummary
+
+CLAIMED_CHANCE = 0.85
+
 
 @dataclass(frozen=True)
 class Tile:
@@ -86,11 +90,13 @@ def build_headline_tiles(  # noqa: PLR0913
     throughput: dict[str, int],
     flow_efficiency: float,
     scope_tile: Tile | None = None,
+    backtest: Tile | None = None,
 ) -> list[Tile]:
     """Build the report hero row; scope_tile is None without a forecast query."""
     tiles = [
         _cycle_tile(scatter),
         _forecast_tile(forecast, "85% of backlog done"),
+        *([backtest] if backtest is not None else []),
         Tile("Work in progress", str(len(aging))),
         _throughput_tile(throughput),
         Tile("Flow efficiency", f"{flow_efficiency:.0%}"),
@@ -106,6 +112,19 @@ def scope_forecast_tile(forecast: dict[str, Any], open_count: int) -> Tile:
     if open_count == 0:
         return Tile(label, "all done")
     return _forecast_tile(forecast, label)
+
+
+def backtest_tile(summary: BacktestSummary | None, horizon: int) -> Tile:
+    """How often past 85% forecasts over the horizon came true."""
+    if summary is None:
+        return Tile("85% forecasts held", "n/a")
+    held = summary.held_85
+    return Tile(
+        f"of {summary.count} past {horizon}-week 85% forecasts held",
+        f"{held:.0%}",
+        "as promised" if held >= CLAIMED_CHANCE else "fewer than promised",
+        held >= CLAIMED_CHANCE,
+    )
 
 
 def build_stuck_rows(

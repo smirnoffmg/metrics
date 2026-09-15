@@ -130,3 +130,18 @@ def test_repository_converts_the_issues_to_forecast():
     )
     repo = JiraIssuesRepository(source, JiraDataConverter())
     assert [issue.key for issue in repo.forecast_issues()] == ["X-2", "X-3"]
+
+
+def test_jiraissuesrepository_issues_at_an_earlier_moment():
+    later = make_raw_issue("X-2", created="2024-03-01T00:00:00.000+0000")
+    api = MagicMock()
+    api.get_snapshot.return_value = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2024, 4, 1, tzinfo=UTC),
+        issues=[make_raw_issue("X-1"), later],
+    )
+    repo = JiraIssuesRepository(api, JiraDataConverter())
+    repo.all()
+    assert [i.key for i in repo.issues_at(datetime(2024, 2, 1, tzinfo=UTC))] == ["X-1"]
+    api.get_snapshot.assert_called_once()

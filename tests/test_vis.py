@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from metrics.services.backtest import Backtest, BacktestSummary
 from metrics.services.vis import (
     VisService,
     biggest_drop,
@@ -213,3 +214,21 @@ def test_tail_threshold_keeps_a_decimal_for_short_durations():
     # change lead times of a few days: "3" beside a body bar at 4 misread
     assert tail_threshold(3.7) == "3.7"
     assert tail_threshold(487.9) == "487"
+
+
+def test_visservice_vis_backtest_creates_file(temp_png_file):
+    results = [
+        Backtest(
+            origin=date(2024, 1, 1 + 7 * i),
+            horizon=4,
+            actual=actual,
+            p50=10.0,
+            at_least_85=6.0,
+            u=u,
+            crps=2.0,
+        )
+        for i, (actual, u) in enumerate([(12, 0.7), (4, 0.05), (10, 0.5)])
+    ]
+    summary = BacktestSummary(count=3, held_85=2 / 3, kolmogorov=0.3, mean_crps=2.0)
+    VisService().vis_backtest(temp_png_file, results, summary)
+    assert Path(temp_png_file).exists()

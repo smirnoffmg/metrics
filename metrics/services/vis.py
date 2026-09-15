@@ -16,11 +16,14 @@ from matplotlib.ticker import MaxNLocator
 from .base import BaseService
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from typing import Any
 
     from matplotlib.artist import Artist
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
+
+    from .backtest import Backtest, BacktestSummary
 
 PERCENTILES = (50, 85, 95)
 PERCENTILE_STYLES = ("--", "-.", ":")
@@ -352,6 +355,64 @@ class VisService(BaseService):
         ax.set_xlabel("weeks to complete backlog")
         ax.set_ylabel("simulations")
         ax.set_title(title or f"Monte Carlo Forecast ({result['backlog']} open issues)")
+        self._save_figure(fig, filename)
+
+    def vis_backtest(
+        self,
+        filename: str,
+        results: Sequence[Backtest],
+        summary: BacktestSummary,
+    ) -> None:
+        """Render past forecasts against outcomes, and their u-plot."""
+        fig, (history, uplot) = plt.subplots(1, 2, figsize=WIDE_FIGSIZE)
+        horizon = results[0].horizon
+        origins = [r.origin for r in results]
+        history.plot(
+            origins,
+            [r.p50 for r in results],
+            color=INK_SECONDARY,
+            linestyle="--",
+            linewidth=1.5,
+            label="forecast p50",
+        )
+        history.plot(
+            origins,
+            [r.at_least_85 for r in results],
+            color=SERIES,
+            linewidth=2,
+            label="85% chance of at least",
+        )
+        missed = [r.actual < r.at_least_85 for r in results]
+        outcomes = ((False, INK_MUTED, "held"), (True, ZONE, "missed"))
+        for is_missed, color, label in outcomes:
+            picked = [r for r, m in zip(results, missed, strict=True) if m == is_missed]
+            history.scatter(
+                [r.origin for r in picked],
+                [r.actual for r in picked],
+                color=color,
+                s=36,
+                zorder=3,
+                label=f"actual, {label} ({len(picked)})",
+            )
+        history.set_xlabel("forecast made on")
+        history.set_ylabel(f"issues finished in the next {horizon} weeks")
+        history.set_title(f"{summary.held_85:.0%} of 85% forecasts held")
+        history.legend()
+        plt.setp(history.get_xticklabels(), rotation=45, ha="right")
+
+        u = np.sort([r.u for r in results])
+        steps = np.arange(1, len(u) + 1) / len(u)
+        uplot.plot([0, 1], [0, 1], color=BASELINE, linestyle="--", label="honest")
+        uplot.step(u, steps, where="post", color=SERIES, linewidth=2, label="past")
+        uplot.text(0.03, 0.95, "optimistic", color=INK_MUTED, va="top")
+        uplot.text(0.97, 0.05, "pessimistic", color=INK_MUTED, ha="right")
+        uplot.set_xlim(0, 1)
+        uplot.set_ylim(0, 1)
+        uplot.set_xlabel("u: forecast chance of finishing fewer than actual")
+        uplot.set_ylabel("share of forecasts")
+        uplot.set_title(f"u-plot, Kolmogorov distance {summary.kolmogorov:.2f}")
+        uplot.legend(loc="upper center")
+        fig.tight_layout()
         self._save_figure(fig, filename)
 
     def vis_aging_wip(self, filename: str, df: pd.DataFrame) -> None:
