@@ -13,6 +13,8 @@ import click
 
 if TYPE_CHECKING:
     import pandas as pd
+
+    from metrics.entity import Issue
 from dependency_injector.wiring import Provide, inject
 
 from metrics.consts import (
@@ -24,11 +26,25 @@ from metrics.consts import (
     TESTING_STATUSES,
 )
 from metrics.containers import Container
+from metrics.repository import BaseIssuesRepository  # noqa: TC001
 from metrics.services import (  # noqa: TC001
     InteractiveVisService,
-    MetricsService,
     ReportService,
     VisService,
+)
+from metrics.services.calculator import (
+    aging_wip,
+    assignee_load,
+    cumulative_flow,
+    cycle_time_points,
+    cycle_times,
+    flow_efficiency,
+    lead_times,
+    median_queue_hours,
+    monte_carlo_forecast,
+    queue_times,
+    returns_to_testing,
+    weekly_throughput,
 )
 from metrics.services.stats import build_headline_tiles, build_stuck_rows
 
@@ -341,28 +357,32 @@ def cli(  # noqa: PLR0913
 
 
 @inject
-def calculate_metrics(
-    metrics_service: MetricsService = Provide[Container.metrics_service],
+def calculate_metrics(  # noqa: PLR0913
+    repo: BaseIssuesRepository = Provide[Container.repo],
     vis_service: VisService = Provide[Container.vis_service],
     interactive_service: InteractiveVisService = Provide[
         Container.interactive_vis_service
     ],
     report_service: ReportService = Provide[Container.report_service],
     server_url: str = Provide[Container.config.jira.server],
+    active_statuses: list[str] = Provide[Container.config.jira.active_statuses],
+    testing_statuses: list[str] = Provide[Container.config.jira.testing_statuses],
 ) -> None:
     """Calculate all metrics, save charts, and write the HTML report."""
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
 
-    scatter = metrics_service.get_cycle_time_scatter()
-    cfd = metrics_service.get_cumulative_flow()
-    aging = metrics_service.get_aging_wip()
-    forecast = metrics_service.get_forecast()
-    throughput = metrics_service.get_throughput()
-    load, handoffs = metrics_service.get_assignee_load()
+    issues = repo.all()
+    scatter = cycle_time_points(issues)
+    cfd = cumulative_flow(issues)
+    aging = aging_wip(issues)
+    throughput = weekly_throughput(issues)
+    forecast = monte_carlo_forecast(issues, throughput)
+    load, handoffs = assignee_load(issues)
 
     report_images = _render_static_charts(
-        metrics_service,
+        issues,
+        testing_statuses,
         vis_service,
         output_dir,
         throughput,
@@ -385,7 +405,7 @@ def calculate_metrics(
         aging,
         forecast,
         throughput,
-        metrics_service.get_flow_efficiency(),
+        flow_efficiency(issues, active_statuses),
     )
     report_path = output_dir / "report.html"
     report_service.render(
@@ -399,7 +419,8 @@ def calculate_metrics(
 
 
 def _render_static_charts(  # noqa: PLR0913
-    metrics_service: MetricsService,
+    issues: list[Issue],
+    testing_statuses: list[str],
     vis_service: VisService,
     output_dir: Path,
     throughput: dict[str, int],
@@ -408,8 +429,8 @@ def _render_static_charts(  # noqa: PLR0913
 ) -> list[Path]:
     charts = []
     durations = (
-        ("lead_time", metrics_service.get_lead_time()),
-        ("cycle_time", metrics_service.get_cycle_time()),
+        ("lead_time", lead_times(issues)),
+        ("cycle_time", cycle_times(issues)),
     )
     for name, days in durations:
         path = output_dir / f"{name}.png"
@@ -419,7 +440,7 @@ def _render_static_charts(  # noqa: PLR0913
     path = output_dir / "return_to_testing.png"
     vis_service.vis_array_like(
         str(path),
-        metrics_service.get_return_to_testing(),
+        returns_to_testing(issues, testing_statuses),
         x_label="returns to testing",
         y_label="number of issues",
     )
@@ -432,12 +453,12 @@ def _render_static_charts(  # noqa: PLR0913
     path = output_dir / "cumulative_queue_time.png"
     vis_service.vis_cumulative_queue_time(
         str(path),
-        metrics_service.get_cumulative_queue_time(),
+        median_queue_hours(issues),
     )
     charts.append(path)
 
     path = output_dir / "queue_time.png"
-    vis_service.vis_queue_grid(str(path), metrics_service.get_queue_time())
+    vis_service.vis_queue_grid(str(path), queue_times(issues))
     charts.append(path)
 
     path = output_dir / "assignee_load.png"

@@ -24,15 +24,6 @@ def dummy_issue():
 
 
 @pytest.fixture
-def dummy_repo(dummy_issue):
-    class DummyRepo:
-        def all(self):
-            return [dummy_issue]
-
-    return DummyRepo()
-
-
-@pytest.fixture
 def temp_png_file():
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         path = Path(tmp.name)

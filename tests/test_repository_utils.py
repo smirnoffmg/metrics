@@ -19,7 +19,6 @@ from metrics.repository.utils import (
     get_issues_slice,
     get_issues_total,
 )
-from metrics.services.metrics import MetricsService
 from metrics.services.vis import VisService
 from metrics.utils import get_jira_client
 from tests.fakes import FakeCloudJira, FakeJira, make_raw_issue
@@ -154,7 +153,7 @@ def test_get_jira_client_server_uses_token_auth():
         )
 
 
-def test_container_resolves_metrics_service_with_single_fetch():
+def test_container_repo_fetches_issues_once():
     with patch.object(
         JiraIssuesRepository,
         "get_raw_data",
@@ -171,34 +170,26 @@ def test_container_resolves_metrics_service_with_single_fetch():
                 },
             },
         )
-        container.metrics_service()
+        assert container.repo() is container.repo()
         assert mock_fetch.call_count == 1
 
 
 def test_container_provides_services():
-    container = Container()
-    container.jira.override(MagicMock(name="JIRA"))
-    container.config.from_dict(
-        {
-            "jira": {
-                "server": "http://example.com",
-                "token": "dummy-token",
-                "jql": "project=TEST",
+    with patch.object(JiraIssuesRepository, "get_raw_data", return_value=[]):
+        container = Container()
+        container.jira.override(MagicMock(name="JIRA"))
+        container.config.from_dict(
+            {
+                "jira": {
+                    "server": "http://example.com",
+                    "token": "dummy-token",
+                    "jql": "project=TEST",
+                },
             },
-        },
-    )
-    container.init_resources()
-    metrics_service = container.metrics_service()
-    vis_service = container.vis_service()
-
-    assert isinstance(metrics_service, MetricsService)
-    assert isinstance(vis_service, VisService)
-    assert metrics_service.cycle_time_calculator is not None
-    assert metrics_service.lead_time_calculator is not None
-    assert metrics_service.queue_time_calculator is not None
-    assert metrics_service.throughput_calculator is not None
-    assert metrics_service.cumulative_queue_time_calculator is not None
-    assert metrics_service.return_to_testing_calculator is not None
+        )
+        container.init_resources()
+        assert isinstance(container.repo(), JiraIssuesRepository)
+        assert isinstance(container.vis_service(), VisService)
 
 
 def _history(day: int) -> dict:
