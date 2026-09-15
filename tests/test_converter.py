@@ -54,6 +54,7 @@ def test_jiradataconverter_parse_changelog_item():
     result = converter._parse_changelog_item(  # noqa: SLF001
         created_at,
         changelog,
+        {},
     )
     assert "To Do" in result["statuses_x_periods"]
     assert "user1" in result["doers_x_periods"]
@@ -416,3 +417,76 @@ def test_converter_accepts_custom_discarded_resolutions():
     converter = JiraDataConverter(discarded_resolutions=["out of scope"])
     assert converter.convert_data_to_issue(data_item).discarded
     assert JiraDataConverter().convert_data_to_issue(data_item).was_done
+
+
+def _issue_through_ids(*steps: tuple[str, str, str], current: str) -> dict:
+    """Like _issue_moving_through, with status ids as Jira sends them."""
+    raw = _issue_moving_through(*steps)
+    for history in raw["changelog"]["histories"]:
+        for item in history["items"]:
+            item["from"] = f"id-{item['fromString']}"
+            item["to"] = f"id-{item['toString']}"
+    raw["fields"]["status"] = {"id": f"id-{current}", "name": current}
+    return raw
+
+
+CATEGORIES = {
+    "id-New": "new",
+    "id-Planning": "new",
+    "id-Awaiting response": "new",
+    "id-Waiting for review": "indeterminate",
+    "id-Shipped": "done",
+    "id-Cancelled": "done",
+}
+
+
+def test_status_category_new_does_not_start_cycle_time():
+    raw = _issue_through_ids(
+        ("2024-01-02", "New", "Planning"),
+        ("2024-01-05", "Planning", "Awaiting response"),
+        ("2024-01-10", "Awaiting response", "Waiting for review"),
+        current="Waiting for review",
+    )
+    issue = JiraDataConverter().convert_data_to_issue(raw, CATEGORIES)
+    assert issue.started_at == datetime(2024, 1, 10, tzinfo=UTC)
+    # without categories the names are unknown, so Planning counts as started
+    assert JiraDataConverter().convert_data_to_issue(raw).started_at == datetime(
+        2024, 1, 2, tzinfo=UTC
+    )
+
+
+def test_status_category_done_finishes_a_status_named_anything():
+    raw = _issue_through_ids(
+        ("2024-01-02", "New", "Waiting for review"),
+        ("2024-01-06", "Waiting for review", "Shipped"),
+        current="Shipped",
+    )
+    issue = JiraDataConverter().convert_data_to_issue(raw, CATEGORIES)
+    assert issue.last_finish_status_at == datetime(2024, 1, 6, tzinfo=UTC)
+    assert issue.cycle_time == timedelta(days=4)
+
+
+def test_discarded_status_names_win_over_the_done_category():
+    raw = _issue_through_ids(
+        ("2024-01-02", "New", "Cancelled"),
+        current="Cancelled",
+    )
+    issue = JiraDataConverter().convert_data_to_issue(raw, CATEGORIES)
+    assert issue.discarded
+    assert not issue.was_done
+
+
+def test_explicit_status_lists_override_categories():
+    raw = _issue_through_ids(
+        ("2024-01-02", "New", "Waiting for review"),
+        ("2024-01-06", "Waiting for review", "Shipped"),
+        current="Shipped",
+    )
+    converter = JiraDataConverter(
+        backlog_statuses=["new", "waiting for review"],
+        done_statuses=["done"],
+    )
+    issue = converter.convert_data_to_issue(raw, CATEGORIES)
+    # by category work starts in Waiting for review and ends in Shipped
+    assert issue.started_at == datetime(2024, 1, 6, tzinfo=UTC)
+    assert not issue.was_done

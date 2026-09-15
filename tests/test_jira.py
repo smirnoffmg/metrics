@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 from metrics.repository.converter import JiraDataConverter
 from metrics.repository.jira import JiraAPIRepository, JiraIssuesRepository
 from metrics.repository.snapshot import Snapshot
-from tests.fakes import FakeCloudJira, FakeJira, make_raw_issue
+from tests.fakes import FakeCloudJira, FakeJira, FakeStatus, make_raw_issue
 
 
 def test_jiraapirepository_cloud_uses_enhanced_search():
@@ -52,3 +52,45 @@ def test_jiraissuesrepository_all():
     assert len(issues) == 1
     assert issues[0].key == "ISSUE-1"
     mock_api_repo.get_snapshot.assert_called_once()
+
+
+def test_snapshot_carries_status_categories():
+    fake = FakeJira(
+        [make_raw_issue("X-1")],
+        statuses=[FakeStatus("1", "Open", "new"), FakeStatus("6", "Closed", "done")],
+    )
+    snapshot = JiraAPIRepository(fake, "project = X", cloud=False).get_snapshot()
+    assert snapshot.statuses == {"1": "new", "6": "done"}
+
+
+def test_repository_learns_categories_of_statuses_the_status_list_missed():
+    issue = make_raw_issue("X-1")
+    issue["fields"]["status"] = {
+        "id": "10500",
+        "name": "Shipped",
+        "statusCategory": {"key": "done"},
+    }
+    issue["changelog"]["histories"] = [
+        {
+            "created": "2024-01-03T00:00:00.000+0000",
+            "items": [
+                {
+                    "field": "status",
+                    "from": "1",
+                    "fromString": "Open",
+                    "to": "10500",
+                    "toString": "Shipped",
+                },
+            ],
+        },
+    ]
+    source = MagicMock()
+    source.get_snapshot.return_value = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2024, 1, 5, tzinfo=UTC),
+        issues=[issue],
+        statuses={"1": "new"},
+    )
+    repo = JiraIssuesRepository(source, JiraDataConverter())
+    assert repo.all()[0].was_done

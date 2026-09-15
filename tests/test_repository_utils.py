@@ -155,11 +155,19 @@ def test_get_jira_client_server_uses_token_auth():
         )
 
 
+_EMPTY_SNAPSHOT = Snapshot(
+    server="http://example.com",
+    jql="project=TEST",
+    fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+    issues=[],
+)
+
+
 def test_container_repo_fetches_issues_once():
     with patch.object(
-        JiraIssuesRepository,
-        "get_raw_data",
-        return_value=[],
+        JiraAPIRepository,
+        "get_snapshot",
+        return_value=_EMPTY_SNAPSHOT,
     ) as mock_fetch:
         container = Container()
         container.jira.override(MagicMock(name="JIRA"))
@@ -177,7 +185,7 @@ def test_container_repo_fetches_issues_once():
 
 
 def test_container_provides_services():
-    with patch.object(JiraIssuesRepository, "get_raw_data", return_value=[]):
+    with patch.object(JiraAPIRepository, "get_snapshot", return_value=_EMPTY_SNAPSHOT):
         container = Container()
         container.jira.override(MagicMock(name="JIRA"))
         container.config.from_dict(

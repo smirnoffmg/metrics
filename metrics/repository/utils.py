@@ -151,6 +151,18 @@ def _complete_changelog(j: JIRA, issue: dict) -> None:
     changelog["histories"] = histories
 
 
+def get_status_categories(j: JIRA) -> dict[str, str]:
+    """Map every status id Jira lists to its category key."""
+    try:
+        statuses = j.statuses()
+    except JIRAError as err:
+        logger.warning("Could not list Jira statuses, classifying by name: %s", err)
+        return {}
+    return {
+        status.raw["id"]: status.raw["statusCategory"]["key"] for status in statuses
+    }
+
+
 def get_issues(j: JIRA, jql: str) -> list[dict]:
     """Retrieve issues from JIRA in parallel using a thread pool.
 

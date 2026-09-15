@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 from .base import BaseIssuesRepository
-from .snapshot import Snapshot, save_snapshot
-from .utils import get_issues, get_issues_cloud
+from .snapshot import Snapshot, current_status_categories, save_snapshot
+from .utils import get_issues, get_issues_cloud, get_status_categories
 
 if TYPE_CHECKING:
     from jira import JIRA
@@ -56,6 +56,7 @@ class JiraAPIRepository:
             jql=self.jql,
             fetched_at=fetched_at,
             issues=self.get_raw_data(),
+            statuses=get_status_categories(self.jira),
         )
 
 
@@ -91,6 +92,12 @@ class JiraIssuesRepository(BaseIssuesRepository):
             save_snapshot(self.snapshot, self.save_path)
         return self.snapshot.issues
 
+    def get_issues(self) -> list[Issue]:
+        """Convert the snapshot's issues, classifying statuses by category."""
+        raw = self.get_raw_data()
+        categories = {**self.snapshot.statuses, **current_status_categories(raw)}
+        return [self.converter.convert_data_to_issue(item, categories) for item in raw]
+
     def convert_data_to_issue(self, data_item: dict) -> Issue:
         """Convert a raw Jira dict to an Issue via the converter."""
-        return self.converter.convert_data_to_issue(data_item)
+        return self.converter.convert_data_to_issue(data_item, self.snapshot.statuses)

@@ -99,7 +99,10 @@ def parse_bool(value: object) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-def parse_status_list(value: str | list[str] | None, default: list[str]) -> list[str]:
+def parse_status_list(
+    value: str | list[str] | None,
+    default: list[str] | None,
+) -> list[str] | None:
     """Normalize a status list from a comma string or list; default otherwise."""
     if value is None:
         return default
@@ -202,7 +205,8 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     "--done-statuses",
     envvar="JIRA_DONE_STATUSES",
     help="Comma-separated statuses that mean an issue is finished"
-    f" (default: {','.join(DONE_STATUSES)}).",
+    " (default: statuses in Jira's Done category; for statuses of unknown"
+    f" category, {','.join(DONE_STATUSES)}).",
 )
 @click.option(
     "--discarded-statuses",
@@ -222,7 +226,8 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     "--backlog-statuses",
     envvar="JIRA_BACKLOG_STATUSES",
     help="Comma-separated statuses before work is committed to; cycle time starts"
-    f" when an issue first leaves them (default: {','.join(BACKLOG_STATUSES)}).",
+    " when an issue first leaves them (default: statuses in Jira's To Do"
+    f" category; for statuses of unknown category, {','.join(BACKLOG_STATUSES)}).",
 )
 @click.option(
     "--testing-statuses",
@@ -341,9 +346,10 @@ def cli(  # noqa: PLR0913
                     "anonymous": is_anonymous,
                     # None = auto-detect from serverInfo (anonymous mode)
                     "cloud": None if is_anonymous else bool(cfg.get("email")),
+                    # unset done and backlog lists leave it to status categories
                     "done_statuses": parse_status_list(
                         cfg.get("done_statuses"),
-                        DONE_STATUSES,
+                        None,
                     ),
                     "discarded_statuses": parse_status_list(
                         cfg.get("discarded_statuses"),
@@ -355,7 +361,7 @@ def cli(  # noqa: PLR0913
                     ),
                     "backlog_statuses": parse_status_list(
                         cfg.get("backlog_statuses"),
-                        BACKLOG_STATUSES,
+                        None,
                     ),
                     "testing_statuses": parse_status_list(
                         cfg.get("testing_statuses"),

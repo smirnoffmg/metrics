@@ -16,6 +16,13 @@ def make_raw_issue(key: str, created: str = "2024-01-01T00:00:00.000+0000") -> d
     }
 
 
+class FakeStatus:
+    """Mimics jira.resources.Status, whose JSON sits in .raw."""
+
+    def __init__(self, status_id: str, name: str, category: str) -> None:
+        self.raw = {"id": status_id, "name": name, "statusCategory": {"key": category}}
+
+
 class _NotSubscriptable:
     """Stands in for jira.Issue, which has no __getitem__."""
 
@@ -29,9 +36,17 @@ class FakeJira:
 
     deploymentType = "Server"  # noqa: N815 - mirrors the jira client attribute
 
-    def __init__(self, issues: list[dict]) -> None:
+    def __init__(
+        self,
+        issues: list[dict],
+        statuses: list[FakeStatus] | None = None,
+    ) -> None:
         self.issues = issues
         self.search_calls: list[dict[str, Any]] = []
+        self._statuses = statuses or []
+
+    def statuses(self) -> list[FakeStatus]:
+        return self._statuses
 
     def search_issues(self, jql_str: str, **kwargs: Any) -> Any:  # noqa: ARG002
         self.search_calls.append(kwargs)

@@ -108,7 +108,15 @@ def _raw_issue(key, status, *steps, resolution=None):
             "histories": [
                 {
                     "created": f"{day}T00:00:00.000+0000",
-                    "items": [{"field": "status", "fromString": frm, "toString": to}],
+                    "items": [
+                        {
+                            "field": "status",
+                            "from": frm,
+                            "fromString": frm,
+                            "to": to,
+                            "toString": to,
+                        },
+                    ],
                 }
                 for day, frm, to in steps
             ],
@@ -140,3 +148,46 @@ def test_cli_builds_the_report_from_a_saved_snapshot_without_jira():
         assert result.exit_code == 0, result.output
         report = Path("output/report.html").read_text()
     assert "https://jira.example/browse/X-99" in report
+
+
+def test_cli_classifies_statuses_by_category_unless_told_otherwise():
+    issues = [
+        _raw_issue(
+            f"X-{i}",
+            "Done",
+            ("2026-06-02", "Open", "In Progress"),
+            (f"2026-{6 + i % 3:02d}-{10 + i:02d}", "In Progress", "Done"),
+            resolution="Fixed",
+        )
+        for i in range(12)
+    ] + [
+        _raw_issue("X-50", "Planning", ("2026-09-01", "Open", "Planning")),
+        _raw_issue("X-51", "In Progress", ("2026-09-01", "Open", "In Progress")),
+    ]
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=issues,
+        statuses={
+            "Open": "new",
+            "Planning": "new",
+            "In Progress": "indeterminate",
+            "Done": "done",
+        },
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        by_category = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert by_category.exit_code == 0, by_category.output
+        by_category_report = Path("output/report.html").read_text()
+        by_name = runner.invoke(
+            cli,
+            ["--from-raw", "raw.json", "--backlog-statuses", "open"],
+        )
+        assert by_name.exit_code == 0, by_name.output
+        by_name_report = Path("output/report.html").read_text()
+    assert "browse/X-50" not in by_category_report
+    assert "browse/X-51" in by_category_report
+    assert "browse/X-50" in by_name_report

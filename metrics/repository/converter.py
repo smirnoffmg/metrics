@@ -28,7 +28,14 @@ class JiraDataConverter:
         backlog_statuses: list[str] | None = None,
         discarded_resolutions: list[str] | None = None,
     ) -> None:
-        """Initialize with the statuses that mean finished, dropped, or not started."""
+        """Initialize with the statuses that mean finished, dropped, or not started.
+
+        Done and backlog lists given here override Jira's status categories;
+        left out, a status's category decides, and the default names only
+        cover statuses whose category is unknown.
+        """
+        self.done_explicit = bool(done_statuses)
+        self.backlog_explicit = bool(backlog_statuses)
         self.done_statuses = _lowered(done_statuses or DONE_STATUSES)
         self.discarded_statuses = _lowered(discarded_statuses or DISCARDED_STATUSES)
         self.backlog_statuses = _lowered(backlog_statuses or BACKLOG_STATUSES)
@@ -36,13 +43,22 @@ class JiraDataConverter:
             discarded_resolutions or DISCARDED_RESOLUTIONS,
         )
 
-    def convert_data_to_issue(self, data_item: dict) -> Issue:
-        """Convert a raw Jira data dict into an Issue entity."""
+    def convert_data_to_issue(
+        self,
+        data_item: dict,
+        status_categories: dict[str, str] | None = None,
+    ) -> Issue:
+        """Convert a raw Jira data dict into an Issue entity.
+
+        status_categories maps a status id to its Jira category key:
+        new, indeterminate or done.
+        """
         issue_created_at = parse(data_item["fields"]["created"])
         changelog = data_item["changelog"]
         changelog_data = self._parse_changelog_item(
             issue_created_at,
             changelog,
+            status_categories or {},
         )
         self._credit_trailing_period(data_item, changelog_data)
         self._discard_by_resolution(data_item, changelog_data)
@@ -64,6 +80,7 @@ class JiraDataConverter:
         self,
         issue_created_at: datetime,
         changelog: dict,
+        status_categories: dict[str, str],
     ) -> dict[str, Any]:
         data: dict[str, Any] = {
             "status_history": ["created"],
@@ -95,6 +112,7 @@ class JiraDataConverter:
                         item,
                         history_ts,
                         data,
+                        status_categories,
                     )
         return data
 
@@ -152,6 +170,7 @@ class JiraDataConverter:
         item: dict,
         history_ts: datetime,
         data: dict[str, Any],
+        status_categories: dict[str, str],
     ) -> None:
         data["status_history"].append(item["toString"])
         data["status_transitions"].append(
@@ -166,7 +185,8 @@ class JiraDataConverter:
         )
         data["last_status_changed_at"] = history_ts
         to_status = item["toString"].lower()
-        is_done = to_status in self.done_statuses
+        category = status_categories.get(item.get("to") or "")
+        is_done = self._is_done(to_status, category)
         is_discarded = not is_done and to_status in self.discarded_statuses
         # a reopened issue must stop counting as finished or discarded
         data["last_finish_status_at"] = history_ts if is_done else None
@@ -175,9 +195,20 @@ class JiraDataConverter:
             data["started_at"] is None
             and not is_done
             and not is_discarded
-            and to_status not in self.backlog_statuses
+            and not self._is_backlog(to_status, category)
         ):
             data["started_at"] = history_ts
+
+    def _is_done(self, status: str, category: str | None) -> bool:
+        if self.done_explicit or category is None:
+            return status in self.done_statuses
+        # Jira files cancelled work under done too
+        return category == "done" and status not in self.discarded_statuses
+
+    def _is_backlog(self, status: str, category: str | None) -> bool:
+        if self.backlog_explicit or category is None:
+            return status in self.backlog_statuses
+        return category == "new"
 
 
 def _lowered(statuses: list[str]) -> list[str]:
