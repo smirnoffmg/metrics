@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from metrics.entity.issues import StatusTransition
-from metrics.repository.converter import JiraDataConverter
+from metrics.repository.converter import JiraDataConverter, parse_timestamp
 
 
 def test_jiradataconverter_convert_data_to_issue():
@@ -490,3 +490,15 @@ def test_explicit_status_lists_override_categories():
     # by category work starts in Waiting for review and ends in Shipped
     assert issue.started_at == datetime(2024, 1, 6, tzinfo=UTC)
     assert not issue.was_done
+
+
+def test_parse_timestamp_reads_jira_offsets_without_a_colon():
+    assert parse_timestamp("2024-01-05T13:22:10.123+0300") == datetime(
+        2024, 1, 5, 10, 22, 10, 123000, tzinfo=UTC
+    )
+
+
+def test_parse_timestamp_falls_back_for_strings_iso_parsing_rejects():
+    assert parse_timestamp("Jan 5 2024 13:22 UTC") == datetime(
+        2024, 1, 5, 13, 22, tzinfo=UTC
+    )

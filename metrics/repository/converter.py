@@ -53,7 +53,7 @@ class JiraDataConverter:
         status_categories maps a status id to its Jira category key:
         new, indeterminate or done.
         """
-        issue_created_at = parse(data_item["fields"]["created"])
+        issue_created_at = parse_timestamp(data_item["fields"]["created"])
         changelog = data_item["changelog"]
         changelog_data = self._parse_changelog_item(
             issue_created_at,
@@ -99,7 +99,7 @@ class JiraDataConverter:
             changelog["histories"],
             key=lambda x: x["created"],
         ):
-            history_ts = parse(history_item["created"])
+            history_ts = parse_timestamp(history_item["created"])
             for item in history_item["items"]:
                 if item["field"] == "assignee":
                     self._parse_assignee_changes(
@@ -209,6 +209,17 @@ class JiraDataConverter:
         if self.backlog_explicit or category is None:
             return status in self.backlog_statuses
         return category == "new"
+
+
+def parse_timestamp(stamp: str) -> datetime:
+    """Parse a Jira timestamp, the ISO form Jira sends or anything dateutil reads.
+
+    dateutil alone spends most of a large snapshot's conversion time here.
+    """
+    try:
+        return datetime.fromisoformat(stamp)
+    except ValueError:
+        return parse(stamp)
 
 
 def _lowered(statuses: list[str]) -> list[str]:
