@@ -6,6 +6,7 @@ import base64
 
 import pandas as pd
 
+from metrics.services.backtest import BacktestSummary
 from metrics.services.report import ReportService
 from metrics.services.stats import StuckRow, Tile
 
@@ -73,3 +74,32 @@ def test_report_renders_the_agent_comparison(tmp_path):
     assert "Agents and people" in html
     assert "<td>agents</td><td>3</td><td>1.2d</td><td>50%</td>" in html
     assert "<td>people</td><td>9</td><td>n/a</td><td>n/a</td>" in html
+
+
+def test_report_draws_an_unjudged_delta_in_muted_ink(tmp_path):
+    out = tmp_path / "report.html"
+    tile = Tile("of 68 past 30-week 85% forecasts held", "63%", "only 3 independent")
+    ReportService().render(str(out), tiles=[tile], images=[])
+    html = out.read_text(encoding="utf-8")
+    assert '<div class="delta" style="color:#898781">only 3 independent</div>' in html
+
+
+def test_report_renders_the_backtest_by_horizon(tmp_path):
+    out = tmp_path / "report.html"
+    summaries = [
+        BacktestSummary(
+            horizon=4,
+            count=97,
+            independent=25,
+            held_85=0.904,
+            kolmogorov=0.161,
+            mean_crps=61.3,
+        ),
+    ]
+    ReportService().render(str(out), tiles=[], images=[], backtests=summaries)
+    html = out.read_text(encoding="utf-8")
+    assert "Forecast backtest by horizon" in html
+    assert (
+        "<td>4 weeks</td><td>97</td><td>25</td><td>90%</td><td>0.16</td><td>61.3</td>"
+        in html
+    )

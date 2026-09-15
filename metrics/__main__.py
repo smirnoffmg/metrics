@@ -8,6 +8,7 @@ import os
 import re
 import sys
 from datetime import timedelta
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -44,7 +45,12 @@ from metrics.services import (  # noqa: TC001
     ReportService,
     VisService,
 )
-from metrics.services.backtest import backtest_forecast, summarize_backtests
+from metrics.services.backtest import (
+    SHORT_HORIZONS_WEEKS,
+    BacktestSummary,
+    backtest_forecast,
+    summarize_backtests,
+)
 from metrics.services.calculator import (
     aging_wip,
     assignee_load,
@@ -611,9 +617,10 @@ def calculate_metrics(  # noqa: PLR0913
     if not aging.empty:
         fragments.append(interactive_service.aging_fragment(aging))
     backtest = None
+    backtests: list[BacktestSummary] = []
     if forecast:
         fragments.append(interactive_service.forecast_fragment(forecast))
-        backtest, chart = _report_backtest(
+        backtest, backtests, chart = _report_backtest(
             repo,
             throughput,
             forecast,
@@ -679,6 +686,7 @@ def calculate_metrics(  # noqa: PLR0913
         fragments=fragments,
         stuck_rows=build_stuck_rows(aging, server_url),
         agent_comparison=comparison,
+        backtests=backtests,
     )
     click.echo(f"Report: {report_path}")
 
@@ -689,26 +697,33 @@ def _report_backtest(
     forecast: dict[str, Any],
     vis_service: VisService,
     output_dir: Path,
-) -> tuple[Tile, Path | None]:
-    """Replay past forecasts over the horizon the backlog forecast promises."""
+) -> tuple[Tile, list[BacktestSummary], Path | None]:
+    """Replay past forecasts over short horizons and the one the forecast promises."""
     horizon = max(1, round(forecast["p85"]))
-    results = backtest_forecast(
-        lambda at: weekly_throughput(repo.issues_at(at), now=at),
-        list(throughput),
-        horizon=horizon,
-    )
-    summary = summarize_backtests(results)
-    tile = backtest_tile(summary, horizon)
-    if summary is None:
+    # the horizons rebuild the same Mondays, so each moment is converted once
+    throughput_at = cache(lambda at: weekly_throughput(repo.issues_at(at), now=at))
+    runs = {
+        h: backtest_forecast(throughput_at, list(throughput), horizon=h)
+        for h in sorted({*SHORT_HORIZONS_WEEKS, horizon})
+    }
+    summaries = {
+        h: summary
+        for h, results in runs.items()
+        if (summary := summarize_backtests(results)) is not None
+    }
+    for h, summary in summaries.items():
+        click.echo(
+            f"Backtest: {summary.held_85:.0%} of {summary.count} past 85% forecasts"
+            f" over {h} weeks held ({summary.independent} independent);"
+            f" Kolmogorov distance {summary.kolmogorov:.2f}",
+        )
+    tile = backtest_tile(summaries.get(horizon))
+    if horizon not in summaries:
         click.echo(f"Backtest: too little history for {horizon}-week forecasts")
-        return tile, None
-    click.echo(
-        f"Backtest: {summary.held_85:.0%} of {summary.count} past 85% forecasts"
-        f" over {horizon} weeks held; Kolmogorov distance {summary.kolmogorov:.2f}",
-    )
+        return tile, list(summaries.values()), None
     chart = output_dir / "forecast_backtest.png"
-    vis_service.vis_backtest(str(chart), results, summary)
-    return tile, chart
+    vis_service.vis_backtest(str(chart), runs, summaries, horizon)
+    return tile, list(summaries.values()), chart
 
 
 def _report_delivery(  # noqa: PLR0913

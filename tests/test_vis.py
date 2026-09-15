@@ -217,18 +217,31 @@ def test_tail_threshold_keeps_a_decimal_for_short_durations():
 
 
 def test_visservice_vis_backtest_creates_file(temp_png_file):
-    results = [
-        Backtest(
-            origin=date(2024, 1, 1 + 7 * i),
-            horizon=4,
-            actual=actual,
-            p50=10.0,
-            at_least_85=6.0,
-            u=u,
-            crps=2.0,
+    def run(horizon: int) -> list[Backtest]:
+        return [
+            Backtest(
+                origin=date(2024, 1, 1 + 7 * i),
+                horizon=horizon,
+                actual=actual,
+                p50=10.0,
+                at_least_85=6.0,
+                u=u,
+                crps=2.0,
+            )
+            for i, (actual, u) in enumerate([(12, 0.7), (4, 0.05), (10, 0.5)])
+        ]
+
+    runs = {4: run(4), 30: run(30)}
+    summaries = {
+        h: BacktestSummary(
+            horizon=h,
+            count=3,
+            independent=1,
+            held_85=2 / 3,
+            kolmogorov=0.3,
+            mean_crps=2.0,
         )
-        for i, (actual, u) in enumerate([(12, 0.7), (4, 0.05), (10, 0.5)])
-    ]
-    summary = BacktestSummary(count=3, held_85=2 / 3, kolmogorov=0.3, mean_crps=2.0)
-    VisService().vis_backtest(temp_png_file, results, summary)
+        for h in runs
+    }
+    VisService().vis_backtest(temp_png_file, runs, summaries, horizon=30)
     assert Path(temp_png_file).exists()

@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from .backtest import BacktestSummary
 
 CLAIMED_CHANCE = 0.85
+# below this, even a far-off share of held promises can be chance
+MIN_INDEPENDENT_OUTCOMES = 10
 
 
 @dataclass(frozen=True)
@@ -114,13 +116,20 @@ def scope_forecast_tile(forecast: dict[str, Any], open_count: int) -> Tile:
     return _forecast_tile(forecast, label)
 
 
-def backtest_tile(summary: BacktestSummary | None, horizon: int) -> Tile:
+def backtest_tile(summary: BacktestSummary | None) -> Tile:
     """How often past 85% forecasts over the horizon came true."""
     if summary is None:
         return Tile("85% forecasts held", "n/a")
     held = summary.held_85
+    label = f"of {summary.count} past {summary.horizon}-week 85% forecasts held"
+    if summary.independent < MIN_INDEPENDENT_OUTCOMES:
+        return Tile(
+            label,
+            f"{held:.0%}",
+            f"only {summary.independent} independent outcomes",
+        )
     return Tile(
-        f"of {summary.count} past {horizon}-week 85% forecasts held",
+        label,
         f"{held:.0%}",
         "as promised" if held >= CLAIMED_CHANCE else "fewer than promised",
         held >= CLAIMED_CHANCE,

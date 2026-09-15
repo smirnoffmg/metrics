@@ -151,16 +151,34 @@ def test_build_delivery_tiles_without_enough_deploys():
     assert [tile.value for tile in tiles] == ["n/a", "n/a", "n/a", "no failures"]
 
 
+def _summary(held_85: float, independent: int) -> BacktestSummary:
+    return BacktestSummary(
+        horizon=8,
+        count=40,
+        independent=independent,
+        held_85=held_85,
+        kolmogorov=0.2,
+        mean_crps=9.0,
+    )
+
+
 def test_backtest_tile_says_how_often_the_85_percent_claim_held():
-    summary = BacktestSummary(count=40, held_85=0.725, kolmogorov=0.2, mean_crps=9.0)
-    tile = backtest_tile(summary, horizon=8)
+    tile = backtest_tile(_summary(0.725, independent=12))
     assert tile.value == "72%"
     assert tile.label == "of 40 past 8-week 85% forecasts held"
+    assert tile.delta_text == "fewer than promised"
     assert tile.delta_good is False
 
 
+def test_backtest_tile_does_not_judge_on_few_independent_outcomes():
+    tile = backtest_tile(_summary(0.5, independent=3))
+    assert tile.value == "50%"
+    assert tile.delta_text == "only 3 independent outcomes"
+    assert tile.delta_good is None
+
+
 def test_backtest_tile_without_enough_history():
-    assert backtest_tile(None, horizon=8).value == "n/a"
+    assert backtest_tile(None).value == "n/a"
 
 
 def test_build_headline_tiles_puts_the_backtest_beside_the_forecast():

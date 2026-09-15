@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 BACKTEST_HORIZON_WEEKS: Final[int] = 4
+# short horizons alongside the forecast's own: far more outcomes that do not overlap
+SHORT_HORIZONS_WEEKS: Final[tuple[int, ...]] = (4, 8)
 BACKTEST_SIMULATIONS: Final[int] = 10_000
 
 
@@ -43,7 +45,10 @@ class Backtest:
 class BacktestSummary:
     """How past forecasts held up, taken together."""
 
+    horizon: int
     count: int
+    # forecasts that can be picked with no outcome week in common
+    independent: int
     held_85: float
     kolmogorov: float
     mean_crps: float
@@ -139,11 +144,24 @@ def summarize_backtests(results: Sequence[Backtest]) -> BacktestSummary | None:
     if not results:
         return None
     return BacktestSummary(
+        horizon=results[0].horizon,
         count=len(results),
+        independent=_independent(results),
         held_85=fmean(r.actual >= r.at_least_85 for r in results),
         kolmogorov=kolmogorov_distance([r.u for r in results]),
         mean_crps=fmean(r.crps for r in results),
     )
+
+
+def _independent(results: Sequence[Backtest]) -> int:
+    """Most forecasts whose horizons do not overlap: overlapping ones share outcomes."""
+    count = 0
+    free_from = date.min
+    for result in sorted(results, key=lambda r: r.origin):
+        if result.origin >= free_from:
+            count += 1
+            free_from = result.origin + timedelta(weeks=result.horizon)
+    return count
 
 
 def _midnight(day: date) -> datetime:

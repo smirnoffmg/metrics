@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
@@ -135,11 +136,24 @@ def test_summary_reports_how_often_the_85_percent_claim_held():
             _backtest(0.9, actual=12, at_least_85=8, score=2.0),
         ],
     )
+    assert summary.horizon == 4  # noqa: PLR2004
     assert summary.count == 4  # noqa: PLR2004
     assert summary.held_85 == pytest.approx(0.75)
     assert summary.mean_crps == pytest.approx(2.0)
     us = [0.5, 0.1, 0.7, 0.9]
     assert summary.kolmogorov == pytest.approx(kolmogorov_distance(us))
+
+
+def test_summary_counts_forecasts_whose_outcomes_do_not_overlap():
+    weeks = [0, 1, 2, 3, 4, 5, 6, 7, 8, 12]
+    results = [
+        replace(_backtest(0.5, 1, 1, 1.0), origin=MONDAY + timedelta(weeks=w))
+        for w in weeks
+    ]
+    summary = summarize_backtests(results)
+    assert summary is not None
+    # 4-week outcomes from weeks 0, 4, 8 and 12 share no week
+    assert summary.independent == 4  # noqa: PLR2004
 
 
 def test_summary_of_no_backtests_is_none():

@@ -16,7 +16,7 @@ from matplotlib.ticker import MaxNLocator
 from .base import BaseService
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from typing import Any
 
     from matplotlib.artist import Artist
@@ -360,12 +360,14 @@ class VisService(BaseService):
     def vis_backtest(
         self,
         filename: str,
-        results: Sequence[Backtest],
-        summary: BacktestSummary,
+        runs: Mapping[int, Sequence[Backtest]],
+        summaries: Mapping[int, BacktestSummary],
+        horizon: int,
     ) -> None:
-        """Render past forecasts against outcomes, and their u-plot."""
+        """Render the forecast horizon's past forecasts, and u-plots by horizon."""
         fig, (history, uplot) = plt.subplots(1, 2, figsize=WIDE_FIGSIZE)
-        horizon = results[0].horizon
+        results = runs[horizon]
+        summary = summaries[horizon]
         origins = [r.origin for r in results]
         history.plot(
             origins,
@@ -396,22 +398,38 @@ class VisService(BaseService):
             )
         history.set_xlabel("forecast made on")
         history.set_ylabel(f"issues finished in the next {horizon} weeks")
-        history.set_title(f"{summary.held_85:.0%} of 85% forecasts held")
+        history.set_title(
+            f"{summary.held_85:.0%} of 85% forecasts held"
+            f" ({summary.independent} independent)",
+        )
         history.legend()
         plt.setp(history.get_xticklabels(), rotation=45, ha="right")
 
-        u = np.sort([r.u for r in results])
-        steps = np.arange(1, len(u) + 1) / len(u)
         uplot.plot([0, 1], [0, 1], color=BASELINE, linestyle="--", label="honest")
-        uplot.step(u, steps, where="post", color=SERIES, linewidth=2, label="past")
+        # the forecast's own horizon keeps the series color it has on the left
+        others = iter(CATEGORICAL[1:])
+        for h in sorted(runs):
+            if h not in summaries:
+                continue
+            u = np.sort([r.u for r in runs[h]])
+            steps = np.arange(1, len(u) + 1) / len(u)
+            uplot.step(
+                u,
+                steps,
+                where="post",
+                color=SERIES if h == horizon else next(others),
+                linewidth=2.5 if h == horizon else 1.5,
+                label=f"{h} weeks: distance {summaries[h].kolmogorov:.2f},"
+                f" {summaries[h].independent} independent",
+            )
         uplot.text(0.03, 0.95, "optimistic", color=INK_MUTED, va="top")
         uplot.text(0.97, 0.05, "pessimistic", color=INK_MUTED, ha="right")
         uplot.set_xlim(0, 1)
         uplot.set_ylim(0, 1)
         uplot.set_xlabel("u: forecast chance of finishing fewer than actual")
         uplot.set_ylabel("share of forecasts")
-        uplot.set_title(f"u-plot, Kolmogorov distance {summary.kolmogorov:.2f}")
-        uplot.legend(loc="upper center")
+        uplot.set_title("u-plots by horizon")
+        uplot.legend(loc="upper left", bbox_to_anchor=(0, 0.9), fontsize="small")
         fig.tight_layout()
         self._save_figure(fig, filename)
 
