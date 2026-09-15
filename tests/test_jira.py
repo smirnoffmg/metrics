@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from metrics.repository.converter import JiraDataConverter
 from metrics.repository.jira import JiraAPIRepository, JiraIssuesRepository
+from metrics.repository.snapshot import Snapshot
 from tests.fakes import FakeCloudJira, FakeJira, make_raw_issue
 
 
@@ -38,19 +40,15 @@ def test_jiraapirepository_get_raw_data():
 
 def test_jiraissuesrepository_all():
     mock_api_repo = MagicMock()
-    mock_api_repo.get_raw_data.return_value = [
-        {
-            "key": "ISSUE-1",
-            "fields": {
-                "created": "2024-01-01T00:00:00.000+0000",
-                "status": {"name": "Done"},
-            },
-            "changelog": {"histories": []},
-        },
-    ]
+    mock_api_repo.get_snapshot.return_value = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2024, 1, 2, tzinfo=UTC),
+        issues=[make_raw_issue("ISSUE-1")],
+    )
     mock_converter = JiraDataConverter()
     repo = JiraIssuesRepository(mock_api_repo, mock_converter)
     issues = repo.all()
     assert len(issues) == 1
     assert issues[0].key == "ISSUE-1"
-    mock_api_repo.get_raw_data.assert_called_once()
+    mock_api_repo.get_snapshot.assert_called_once()

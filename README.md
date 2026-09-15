@@ -101,6 +101,7 @@ Then open `output/report.html`.
 - **Cycle time starts at commitment, not at triage.** It runs from the moment an issue first leaves the backlog; name your pre-work statuses with `--backlog-statuses "Open, Ready"` (default: open, new, backlog, to do, reopened). Issues closed straight from the backlog have a lead time but no cycle time.
 - **QA has its own name?** Same for the rework metric, e.g. `--testing-statuses "In review, QA"` (default: testing).
 - **Curious how much time is real work vs waiting?** Tell it where work happens, e.g. `--active-statuses "In Progress, In Development"` (default: in progress) - that powers the flow-efficiency number in the report: the share of cycle time spent in those statuses, so backlog waiting before work starts doesn't count.
+- **Iterating on settings?** Fetch once with `--save-raw issues.json`, then rebuild the report as often as you like with `--from-raw issues.json` - no network, seconds instead of minutes, and the same numbers every time, since time-based metrics are computed as of the fetch.
 - Prefer environment variables or a config file? `uv run python -m metrics --help` shows every option.
 
 Tip: let your JQL include both finished and still-open issues - the forecast and aging charts need the open ones. Select finished issues by when they were resolved, e.g. `resolved >= -90d OR resolution = Unresolved`: a window on `created` leaves out the old issues your team is finishing now and understates throughput, and one on `updated` pulls in issues closed years ago.

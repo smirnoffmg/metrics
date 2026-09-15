@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +12,9 @@ from jira.exceptions import JIRAError
 from metrics.containers import Container
 from metrics.entity.issues import Issue
 from metrics.repository.base import BaseIssuesRepository
-from metrics.repository.jira import JiraIssuesRepository
+from metrics.repository.converter import JiraDataConverter
+from metrics.repository.jira import JiraAPIRepository, JiraIssuesRepository
+from metrics.repository.snapshot import Snapshot, load_snapshot
 from metrics.repository.utils import (
     get_issues,
     get_issues_cloud,
@@ -248,3 +250,41 @@ def test_a_failed_fetch_is_reported_once_by_the_caller(fetch, caplog, monkeypatc
     assert "503 busy" in str(err.value)
     assert str(err.value).count("Failed to fetch") == 1
     assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+class _StaticSource:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+
+    def get_snapshot(self):
+        return self.snapshot
+
+
+def test_repository_keeps_the_snapshot_and_saves_it_on_request(tmp_path):
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=[make_raw_issue("X-1")],
+    )
+    path = tmp_path / "raw.json"
+    repo = JiraIssuesRepository(
+        api_repo=_StaticSource(snapshot),
+        converter=JiraDataConverter(),
+        save_path=str(path),
+    )
+    assert [issue.key for issue in repo.all()] == ["X-1"]
+    assert repo.snapshot == snapshot
+    assert load_snapshot(path) == snapshot
+
+
+def test_jira_api_repository_stamps_the_fetch():
+    fake = FakeJira([make_raw_issue("X-1")])
+    before = datetime.now(tz=UTC)
+    snapshot = JiraAPIRepository(
+        fake, "project = X", server="https://jira.example", cloud=False
+    ).get_snapshot()
+    assert snapshot.server == "https://jira.example"
+    assert snapshot.jql == "project = X"
+    assert before <= snapshot.fetched_at <= datetime.now(tz=UTC)
+    assert [item["key"] for item in snapshot.issues] == ["X-1"]

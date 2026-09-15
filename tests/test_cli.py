@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from pathlib import Path
+
 from click.testing import CliRunner
 
 from metrics.__main__ import cli, parse_bool, parse_status_list, validate_config
@@ -12,6 +15,7 @@ from metrics.consts import (
     DONE_STATUSES,
     TESTING_STATUSES,
 )
+from metrics.repository.snapshot import Snapshot, save_snapshot
 
 
 def test_cli_missing_config():
@@ -85,3 +89,54 @@ def test_default_discarded_resolutions_cover_jira_defaults():
 def test_cli_accepts_discarded_resolutions():
     result = CliRunner().invoke(cli, ["--help"])
     assert "--discarded-resolutions" in result.output
+
+
+def test_validate_config_from_raw_needs_no_jira_settings():
+    assert validate_config({"from_raw": "raw.json"}) == []
+
+
+def _raw_issue(key, status, *steps, resolution=None):
+    return {
+        "key": key,
+        "fields": {
+            "created": "2026-06-01T00:00:00.000+0000",
+            "status": {"name": status},
+            "resolution": {"name": resolution} if resolution else None,
+            "assignee": {"displayName": "alice"},
+        },
+        "changelog": {
+            "histories": [
+                {
+                    "created": f"{day}T00:00:00.000+0000",
+                    "items": [{"field": "status", "fromString": frm, "toString": to}],
+                }
+                for day, frm, to in steps
+            ],
+        },
+    }
+
+
+def test_cli_builds_the_report_from_a_saved_snapshot_without_jira():
+    issues = [
+        _raw_issue(
+            f"X-{i}",
+            "Done",
+            ("2026-06-02", "Open", "In Progress"),
+            (f"2026-{6 + i % 3:02d}-{10 + i:02d}", "In Progress", "Done"),
+            resolution="Fixed",
+        )
+        for i in range(12)
+    ] + [_raw_issue("X-99", "In Progress", ("2026-09-01", "Open", "In Progress"))]
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=issues,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    assert "https://jira.example/browse/X-99" in report

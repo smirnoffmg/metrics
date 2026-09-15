@@ -40,6 +40,7 @@ class Container(containers.DeclarativeContainer):
         JiraAPIRepository,
         jira,
         config.jira.jql,
+        server=config.jira.server,
         cloud=config.jira.cloud,
     )
     jira_data_converter = providers.Factory(
@@ -54,6 +55,7 @@ class Container(containers.DeclarativeContainer):
         JiraIssuesRepository,
         api_repo=jira_api_repo,
         converter=jira_data_converter,
+        save_path=config.jira.save_raw,
     )
 
     vis_service = providers.Factory(

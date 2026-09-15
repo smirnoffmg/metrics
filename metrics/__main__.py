@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
+from dependency_injector import providers
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -26,7 +27,8 @@ from metrics.consts import (
     TESTING_STATUSES,
 )
 from metrics.containers import Container
-from metrics.repository import BaseIssuesRepository  # noqa: TC001
+from metrics.repository.jira import JiraIssuesRepository  # noqa: TC001
+from metrics.repository.snapshot import StaticSnapshotSource, load_snapshot
 from metrics.services import (  # noqa: TC001
     InteractiveVisService,
     ReportService,
@@ -125,6 +127,8 @@ def get_env_config() -> dict[str, str | None]:
 
 def validate_config(cfg: dict[str, Any]) -> list[str]:
     """Validate required Jira configuration fields."""
+    if cfg.get("from_raw"):
+        return []
     errors = []
     server = cfg.get("server")
     anonymous = parse_bool(cfg.get("anonymous"))
@@ -233,6 +237,17 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     f" flow-efficiency metric (default: {','.join(ACTIVE_STATUSES)}).",
 )
 @click.option(
+    "--save-raw",
+    type=click.Path(dir_okay=False),
+    help="Also save the issues fetched from Jira to this JSON file.",
+)
+@click.option(
+    "--from-raw",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Build the report from a file written by --save-raw, without Jira;"
+    " time-based metrics are computed as of when it was fetched.",
+)
+@click.option(
     "--anonymous",
     is_flag=True,
     default=False,
@@ -251,6 +266,8 @@ def cli(  # noqa: PLR0913
     backlog_statuses: str | None,
     testing_statuses: str | None,
     active_statuses: str | None,
+    save_raw: str | None,
+    from_raw: str | None,
     anonymous: bool,  # noqa: FBT001 - click flag
 ) -> None:
     """Analyze and visualize Jira issue metrics."""
@@ -301,6 +318,7 @@ def cli(  # noqa: PLR0913
         "testing_statuses": testing_statuses,
         "active_statuses": active_statuses,
         "anonymous": anonymous or None,
+        "from_raw": from_raw,
     }
     cfg = merge_config(file_cfg, env_cfg, cli_cfg)
     is_anonymous = parse_bool(cfg.get("anonymous"))
@@ -310,13 +328,15 @@ def cli(  # noqa: PLR0913
             click.echo(f"Error: {err}", err=True)
         sys.exit(1)
     try:
+        snapshot = load_snapshot(from_raw) if from_raw else None
         container = Container()
         container.config.from_dict(
             {
                 "jira": {
-                    "server": cfg["server"],
+                    "server": snapshot.server if snapshot else cfg["server"],
                     "token": cfg["token"],
-                    "jql": cfg["jql"],
+                    "jql": snapshot.jql if snapshot else cfg["jql"],
+                    "save_raw": save_raw,
                     "email": cfg.get("email"),
                     "anonymous": is_anonymous,
                     # None = auto-detect from serverInfo (anonymous mode)
@@ -348,6 +368,10 @@ def cli(  # noqa: PLR0913
                 },
             },
         )
+        if snapshot:
+            container.jira_api_repo.override(
+                providers.Object(StaticSnapshotSource(snapshot)),
+            )
         container.init_resources()
         container.wire(modules=[__name__])
         calculate_metrics()
@@ -358,7 +382,7 @@ def cli(  # noqa: PLR0913
 
 @inject
 def calculate_metrics(  # noqa: PLR0913
-    repo: BaseIssuesRepository = Provide[Container.repo],
+    repo: JiraIssuesRepository = Provide[Container.repo],
     vis_service: VisService = Provide[Container.vis_service],
     interactive_service: InteractiveVisService = Provide[
         Container.interactive_vis_service
@@ -373,11 +397,12 @@ def calculate_metrics(  # noqa: PLR0913
     output_dir.mkdir(exist_ok=True)
 
     issues = repo.all()
+    now = repo.snapshot.fetched_at
     scatter = cycle_time_points(issues)
-    cfd = cumulative_flow(issues)
-    aging = aging_wip(issues)
-    throughput = weekly_throughput(issues)
-    forecast = monte_carlo_forecast(issues, throughput)
+    cfd = cumulative_flow(issues, now=now)
+    aging = aging_wip(issues, now=now)
+    throughput = weekly_throughput(issues, now=now)
+    forecast = monte_carlo_forecast(issues, throughput, now=now)
     load, handoffs = assignee_load(issues)
 
     report_images = _render_static_charts(
