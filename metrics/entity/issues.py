@@ -26,8 +26,9 @@ class Issue:
     status: str
 
     created_at: datetime
-    first_status_change_at: datetime | None = None
+    started_at: datetime | None = None
     last_finish_status_at: datetime | None = None
+    discarded: bool = False
 
     status_history: list[str] = field(default_factory=list)
     status_transitions: list[StatusTransition] = field(default_factory=list)
@@ -38,8 +39,13 @@ class Issue:
 
     @property
     def was_done(self) -> bool:
-        """Check if the issue reached a done status at some point."""
+        """Check if the issue's latest status transition was into a done status."""
         return self.last_finish_status_at is not None
+
+    @property
+    def is_open(self) -> bool:
+        """Check if the issue is still pending: neither finished nor discarded."""
+        return not self.was_done and not self.discarded
 
     @property
     def lead_time(self) -> timedelta | None:
@@ -51,7 +57,7 @@ class Issue:
 
     @property
     def cycle_time(self) -> timedelta | None:
-        """Time from first status change to completion, or None."""
-        if self.first_status_change_at and self.last_finish_status_at:
-            return self.last_finish_status_at - self.first_status_change_at
+        """Time from leaving the backlog to completion, or None."""
+        if self.started_at and self.last_finish_status_at:
+            return self.last_finish_status_at - self.started_at
         return None

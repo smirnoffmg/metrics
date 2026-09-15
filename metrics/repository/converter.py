@@ -8,7 +8,7 @@ from typing import Any
 
 from dateutil.parser import parse
 
-from metrics.consts import DONE_STATUSES
+from metrics.consts import BACKLOG_STATUSES, DISCARDED_STATUSES, DONE_STATUSES
 from metrics.entity import Issue
 from metrics.entity.issues import StatusTransition
 
@@ -16,11 +16,16 @@ from metrics.entity.issues import StatusTransition
 class JiraDataConverter:
     """Converts raw Jira API dicts into Issue entities."""
 
-    def __init__(self, done_statuses: list[str] | None = None) -> None:
-        """Initialize with the statuses that count as completion."""
-        self.done_statuses = [
-            status.lower() for status in (done_statuses or DONE_STATUSES)
-        ]
+    def __init__(
+        self,
+        done_statuses: list[str] | None = None,
+        discarded_statuses: list[str] | None = None,
+        backlog_statuses: list[str] | None = None,
+    ) -> None:
+        """Initialize with the statuses that mean finished, dropped, or not started."""
+        self.done_statuses = _lowered(done_statuses or DONE_STATUSES)
+        self.discarded_statuses = _lowered(discarded_statuses or DISCARDED_STATUSES)
+        self.backlog_statuses = _lowered(backlog_statuses or BACKLOG_STATUSES)
 
     def convert_data_to_issue(self, data_item: dict) -> Issue:
         """Convert a raw Jira data dict into an Issue entity."""
@@ -37,8 +42,9 @@ class JiraDataConverter:
             created_at=issue_created_at,
             doers_x_periods=changelog_data["doers_x_periods"],
             statuses_x_periods=changelog_data["statuses_x_periods"],
-            first_status_change_at=changelog_data["first_status_changed_at"],
+            started_at=changelog_data["started_at"],
             last_finish_status_at=changelog_data["last_finish_status_at"],
+            discarded=changelog_data["discarded"],
             status_history=changelog_data["status_history"],
             status_transitions=changelog_data["status_transitions"],
             handoffs=changelog_data["handoffs"],
@@ -55,11 +61,12 @@ class JiraDataConverter:
             "handoffs": 0,
             "doers_x_periods": defaultdict(timedelta),
             "statuses_x_periods": defaultdict(timedelta),
-            "first_status_changed_at": None,
+            "started_at": None,
             "last_status_changed_at": issue_created_at,
             "first_assignee_changed_at": None,
             "last_assignee_changed_at": issue_created_at,
             "last_finish_status_at": None,
+            "discarded": False,
         }
         for history_item in sorted(
             changelog["histories"],
@@ -135,12 +142,20 @@ class JiraDataConverter:
             history_ts - data["last_status_changed_at"]
         )
         data["last_status_changed_at"] = history_ts
-        if data["first_status_changed_at"] is None:
-            data["first_status_changed_at"] = history_ts
-        else:
-            data["first_status_changed_at"] = min(
-                data["first_status_changed_at"],
-                history_ts,
-            )
-        if item["toString"].lower() in self.done_statuses:
-            data["last_finish_status_at"] = history_ts
+        to_status = item["toString"].lower()
+        is_done = to_status in self.done_statuses
+        is_discarded = not is_done and to_status in self.discarded_statuses
+        # a reopened issue must stop counting as finished or discarded
+        data["last_finish_status_at"] = history_ts if is_done else None
+        data["discarded"] = is_discarded
+        if (
+            data["started_at"] is None
+            and not is_done
+            and not is_discarded
+            and to_status not in self.backlog_statuses
+        ):
+            data["started_at"] = history_ts
+
+
+def _lowered(statuses: list[str]) -> list[str]:
+    return [status.lower() for status in statuses]

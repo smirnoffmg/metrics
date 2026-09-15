@@ -5,7 +5,12 @@ from __future__ import annotations
 from click.testing import CliRunner
 
 from metrics.__main__ import cli, parse_bool, parse_status_list, validate_config
-from metrics.consts import DONE_STATUSES, TESTING_STATUSES
+from metrics.consts import (
+    BACKLOG_STATUSES,
+    DISCARDED_STATUSES,
+    DONE_STATUSES,
+    TESTING_STATUSES,
+)
 
 
 def test_cli_missing_config():
@@ -59,3 +64,10 @@ def test_parse_bool():
 def test_parse_status_list_defaults():
     assert parse_status_list(None, DONE_STATUSES) == DONE_STATUSES
     assert parse_status_list(None, TESTING_STATUSES) == TESTING_STATUSES
+
+
+def test_parse_status_list_defaults_for_discarded_and_backlog():
+    assert parse_status_list(None, DISCARDED_STATUSES) == DISCARDED_STATUSES
+    assert "cancelled" not in DONE_STATUSES
+    assert "cancelled" in DISCARDED_STATUSES
+    assert "backlog" in BACKLOG_STATUSES

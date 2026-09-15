@@ -12,7 +12,10 @@ ACTIVE_STATUSES: Final[list[str]] = ["in progress"]
 DONE_STATUSES: Final[list[str]] = [
     "done",
     "completed",
-    "cancelled",
     "closed",
     "resolved",
 ]
+
+DISCARDED_STATUSES: Final[list[str]] = ["cancelled", "canceled", "won't do"]
+
+BACKLOG_STATUSES: Final[list[str]] = ["open", "new", "backlog", "to do", "reopened"]

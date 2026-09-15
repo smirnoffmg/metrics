@@ -152,7 +152,7 @@ def test_cycle_time_scatter_uncapped_days():
         key="A",
         status="Done",
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
-        first_status_change_at=datetime(2024, 1, 1, tzinfo=UTC),
+        started_at=datetime(2024, 1, 1, tzinfo=UTC),
         last_finish_status_at=datetime(2024, 3, 1, tzinfo=UTC),
     )
     open_issue = Issue(
@@ -322,3 +322,31 @@ def test_assignee_load_aggregates_and_drops_unassigned():
     assert list(df["total_days"]) == [4.0, 3.0]
     assert list(df["issue_count"]) == [2, 1]
     assert handoffs == [2, 1]
+
+
+def test_monte_carlo_backlog_excludes_discarded_issues():
+    throughput = StubThroughput({f"2024W{w:02d}": 2 for w in range(1, 7)})
+    discarded = Issue(
+        key="X",
+        status="Cancelled",
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        discarded=True,
+    )
+    calc = MonteCarloForecastCalculator(
+        StubRepo([*_open_issues(4), discarded]),
+        throughput,
+    )
+    assert calc.calculate(seed=1)["backlog"] == 4  # noqa: PLR2004
+
+
+def test_aging_wip_skips_discarded_issues():
+    discarded = Issue(
+        key="X",
+        status="Cancelled",
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        discarded=True,
+    )
+    df = AgingWipCalculator(StubRepo([*_open_issues(1), discarded])).calculate(
+        now=datetime(2024, 1, 10, tzinfo=UTC),
+    )
+    assert list(df["key"]) == ["O-0"]

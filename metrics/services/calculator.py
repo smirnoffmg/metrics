@@ -206,7 +206,7 @@ class MonteCarloForecastCalculator(MetricCalculator):
             list(self.throughput_calculator.calculate().values()),
             dtype=float,
         )
-        backlog = sum(1 for issue in self.repo.all() if not issue.was_done)
+        backlog = sum(1 for issue in self.repo.all() if issue.is_open)
         if (
             backlog == 0
             or len(samples) < MIN_FORECAST_HISTORY_WEEKS
@@ -241,6 +241,7 @@ class AgingWipCalculator(MetricCalculator):
             if issue.was_done:
                 for status, td in issue.statuses_x_periods.items():
                     history[status].append(td.total_seconds() / ONE_DAY)
+            if not issue.is_open:
                 continue
             since = (
                 issue.status_transitions[-1].at

@@ -15,7 +15,13 @@ if TYPE_CHECKING:
     import pandas as pd
 from dependency_injector.wiring import Provide, inject
 
-from metrics.consts import ACTIVE_STATUSES, DONE_STATUSES, TESTING_STATUSES
+from metrics.consts import (
+    ACTIVE_STATUSES,
+    BACKLOG_STATUSES,
+    DISCARDED_STATUSES,
+    DONE_STATUSES,
+    TESTING_STATUSES,
+)
 from metrics.containers import Container
 from metrics.services import (  # noqa: TC001
     InteractiveVisService,
@@ -91,6 +97,8 @@ def get_env_config() -> dict[str, str | None]:
         "jql": os.environ.get("JIRA_JQL"),
         "email": os.environ.get("JIRA_EMAIL"),
         "done_statuses": os.environ.get("JIRA_DONE_STATUSES"),
+        "discarded_statuses": os.environ.get("JIRA_DISCARDED_STATUSES"),
+        "backlog_statuses": os.environ.get("JIRA_BACKLOG_STATUSES"),
         "testing_statuses": os.environ.get("JIRA_TESTING_STATUSES"),
         "active_statuses": os.environ.get("JIRA_ACTIVE_STATUSES"),
         "anonymous": os.environ.get("JIRA_ANONYMOUS"),
@@ -175,6 +183,19 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     f" (default: {','.join(DONE_STATUSES)}).",
 )
 @click.option(
+    "--discarded-statuses",
+    envvar="JIRA_DISCARDED_STATUSES",
+    help="Comma-separated statuses that mean an issue was dropped, not delivered:"
+    " excluded from throughput, cycle time, and the open backlog"
+    f" (default: {','.join(DISCARDED_STATUSES)}).",
+)
+@click.option(
+    "--backlog-statuses",
+    envvar="JIRA_BACKLOG_STATUSES",
+    help="Comma-separated statuses before work is committed to; cycle time starts"
+    f" when an issue first leaves them (default: {','.join(BACKLOG_STATUSES)}).",
+)
+@click.option(
     "--testing-statuses",
     envvar="JIRA_TESTING_STATUSES",
     help="Comma-separated statuses that count as testing/QA for the"
@@ -200,6 +221,8 @@ def cli(  # noqa: PLR0913
     jira_jql: str | None,
     jira_email: str | None,
     done_statuses: str | None,
+    discarded_statuses: str | None,
+    backlog_statuses: str | None,
     testing_statuses: str | None,
     active_statuses: str | None,
     anonymous: bool,  # noqa: FBT001 - click flag
@@ -212,6 +235,8 @@ def cli(  # noqa: PLR0913
         "jql": None,
         "email": None,
         "done_statuses": None,
+        "discarded_statuses": None,
+        "backlog_statuses": None,
         "testing_statuses": None,
         "active_statuses": None,
         "anonymous": None,
@@ -226,6 +251,8 @@ def cli(  # noqa: PLR0913
                 "jql": jira_section.get("jql"),
                 "email": jira_section.get("email"),
                 "done_statuses": jira_section.get("done_statuses"),
+                "discarded_statuses": jira_section.get("discarded_statuses"),
+                "backlog_statuses": jira_section.get("backlog_statuses"),
                 "testing_statuses": jira_section.get("testing_statuses"),
                 "active_statuses": jira_section.get("active_statuses"),
                 "anonymous": jira_section.get("anonymous"),
@@ -240,6 +267,8 @@ def cli(  # noqa: PLR0913
         "jql": jira_jql,
         "email": jira_email,
         "done_statuses": done_statuses,
+        "discarded_statuses": discarded_statuses,
+        "backlog_statuses": backlog_statuses,
         "testing_statuses": testing_statuses,
         "active_statuses": active_statuses,
         "anonymous": anonymous or None,
@@ -266,6 +295,14 @@ def cli(  # noqa: PLR0913
                     "done_statuses": parse_status_list(
                         cfg.get("done_statuses"),
                         DONE_STATUSES,
+                    ),
+                    "discarded_statuses": parse_status_list(
+                        cfg.get("discarded_statuses"),
+                        DISCARDED_STATUSES,
+                    ),
+                    "backlog_statuses": parse_status_list(
+                        cfg.get("backlog_statuses"),
+                        BACKLOG_STATUSES,
                     ),
                     "testing_statuses": parse_status_list(
                         cfg.get("testing_statuses"),

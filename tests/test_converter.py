@@ -258,3 +258,121 @@ def test_converter_records_status_transitions_and_handoffs():
     ]
     expected_handoffs = 2
     assert issue.handoffs == expected_handoffs
+
+
+def _issue_moving_through(*steps: tuple[str, str, str]) -> dict:
+    """Build a raw issue created 2024-01-01 from (date, from, to) status steps."""
+    return {
+        "key": "FLOW-1",
+        "fields": {
+            "created": "2024-01-01T00:00:00.000+0000",
+            "status": {"name": steps[-1][2] if steps else "Open"},
+        },
+        "changelog": {
+            "histories": [
+                {
+                    "created": f"{day}T00:00:00.000+0000",
+                    "items": [
+                        {"field": "status", "fromString": frm, "toString": to},
+                    ],
+                }
+                for day, frm, to in steps
+            ],
+        },
+    }
+
+
+def test_converter_reopened_issue_is_no_longer_done():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "In Progress"),
+            ("2024-01-03", "In Progress", "Done"),
+            ("2024-01-10", "Done", "In Progress"),
+        ),
+    )
+    assert not issue.was_done
+    assert issue.is_open
+    assert issue.cycle_time is None
+
+
+def test_converter_reopened_and_finished_again_uses_last_finish():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "In Progress"),
+            ("2024-01-03", "In Progress", "Done"),
+            ("2024-01-10", "Done", "In Progress"),
+            ("2024-01-12", "In Progress", "Done"),
+        ),
+    )
+    assert issue.last_finish_status_at == datetime(2024, 1, 12, tzinfo=UTC)
+    assert issue.cycle_time == timedelta(days=10)
+
+
+def test_converter_cancelled_issue_is_discarded_not_done():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "Backlog"),
+            ("2024-06-01", "Backlog", "Cancelled"),
+        ),
+    )
+    assert issue.discarded
+    assert not issue.was_done
+    assert not issue.is_open
+    assert issue.lead_time is None
+    assert issue.cycle_time is None
+
+
+def test_converter_accepts_custom_discarded_statuses():
+    data_item = _issue_moving_through(("2024-01-02", "Open", "Rejected"))
+    issue = JiraDataConverter(discarded_statuses=["rejected"]).convert_data_to_issue(
+        data_item,
+    )
+    assert issue.discarded
+    assert not JiraDataConverter().convert_data_to_issue(data_item).discarded
+
+
+def test_converter_restored_discarded_issue_is_open_again():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "Cancelled"),
+            ("2024-01-05", "Cancelled", "Open"),
+        ),
+    )
+    assert not issue.discarded
+    assert issue.is_open
+
+
+def test_converter_backlog_triage_does_not_start_cycle_time():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "Backlog"),
+            ("2024-01-10", "Backlog", "In Progress"),
+            ("2024-01-12", "In Progress", "Done"),
+        ),
+    )
+    assert issue.started_at == datetime(2024, 1, 10, tzinfo=UTC)
+    assert issue.cycle_time == timedelta(days=2)
+    assert issue.lead_time == timedelta(days=11)
+
+
+def test_converter_issue_closed_straight_from_backlog_has_no_cycle_time():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(("2024-01-05", "Open", "Done")),
+    )
+    assert issue.was_done
+    assert issue.started_at is None
+    assert issue.cycle_time is None
+    assert issue.lead_time == timedelta(days=4)
+
+
+def test_converter_accepts_custom_backlog_statuses():
+    data_item = _issue_moving_through(
+        ("2024-01-02", "Open", "Ready"),
+        ("2024-01-04", "Ready", "In Progress"),
+    )
+    issue = JiraDataConverter(backlog_statuses=["open", "ready"]).convert_data_to_issue(
+        data_item,
+    )
+    assert issue.started_at == datetime(2024, 1, 4, tzinfo=UTC)
+    default = JiraDataConverter().convert_data_to_issue(data_item)
+    assert default.started_at == datetime(2024, 1, 2, tzinfo=UTC)

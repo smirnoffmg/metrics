@@ -96,7 +96,9 @@ Then open `output/report.html`.
 - **Jira Cloud:** also pass `--jira-email you@company.com` together with an API token.
 - **Jira Server / Data Center:** just a personal access token, no email needed.
 - **Public instance?** `--anonymous` needs no credentials at all and figures out Cloud vs Server by itself.
-- **Your workflow ends differently?** Tell it what "finished" means, e.g. `--done-statuses "Resolved, Shipped"` (default: done, completed, cancelled, closed, resolved).
+- **Your workflow ends differently?** Tell it what "finished" means, e.g. `--done-statuses "Resolved, Shipped"` (default: done, completed, closed, resolved).
+- **Dropped work isn't delivery.** Statuses like `--discarded-statuses "Rejected, Duplicate"` (default: cancelled, canceled, won't do) count neither as throughput nor as open backlog.
+- **Cycle time starts at commitment, not at triage.** It runs from the moment an issue first leaves the backlog; name your pre-work statuses with `--backlog-statuses "Open, Ready"` (default: open, new, backlog, to do, reopened). Issues closed straight from the backlog have a lead time but no cycle time.
 - **QA has its own name?** Same for the rework metric, e.g. `--testing-statuses "In review, QA"` (default: testing).
 - **Curious how much time is real work vs waiting?** Tell it where work happens, e.g. `--active-statuses "In Progress, In Development"` (default: in progress) - that powers the flow-efficiency number in the report.
 - Prefer environment variables or a config file? `uv run python -m metrics --help` shows every option.

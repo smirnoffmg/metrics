@@ -15,7 +15,7 @@ def test_issue() -> Issue:
         key="TEST-1",
         status="In progress",
         created_at=datetime(2021, 1, 1, 0, 0, 0),
-        first_status_change_at=datetime(2021, 1, 1, 1, 0, 0),
+        started_at=datetime(2021, 1, 1, 1, 0, 0),
         last_finish_status_at=datetime(2021, 1, 1, 2, 0, 0),
     )
 
@@ -26,7 +26,7 @@ def test_empty_issue() -> None:
         status="New",
         created_at=datetime(2021, 1, 1, 0, 0, 0),
     )
-    assert issue.first_status_change_at is None
+    assert issue.started_at is None
     assert issue.last_finish_status_at is None
     assert issue.doers_x_periods == {}
     assert issue.statuses_x_periods == {}

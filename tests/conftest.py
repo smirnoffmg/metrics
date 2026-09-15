@@ -17,7 +17,7 @@ def dummy_issue():
         key="ISSUE-1",
         status="Done",
         created_at=datetime(2024, 1, 1, 0, 0, 0),
-        first_status_change_at=datetime(2024, 1, 1, 1, 0, 0),
+        started_at=datetime(2024, 1, 1, 1, 0, 0),
         last_finish_status_at=datetime(2024, 1, 1, 2, 0, 0),
         statuses_x_periods={"Done": timedelta(hours=1)},
     )
