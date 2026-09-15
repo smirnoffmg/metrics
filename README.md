@@ -21,25 +21,25 @@ Every chart below comes from real public projects - the [Hibernate ORM](https://
 
 ### When will it be done?
 
-**Monte Carlo forecast.** Half the simulations finish 142 open Hibernate issues by late September; 85% by 21 October - real dates, not story points.
+**Monte Carlo forecast.** 316 open Hibernate issues at the pace of the last 12 finished weeks: half the simulations clear them by 24 August 2027, 85% by 12 October 2027 - real dates, not story points.
 
 ![Monte Carlo forecast](docs/images/forecast.png)
 
-**Weekly throughput.** How many issues get finished each week, with the overall trend.
+**Weekly throughput.** How many issues get finished each week, with the overall trend. The week still in progress is left out, and quiet weeks count as zero.
 
 ![Throughput](docs/images/throughput.png)
 
 ### How fast do tickets finish?
 
-**Cycle time, ticket by ticket.** Every dot is a finished Hibernate issue - the last 4 weeks in blue, the slowest ticket named, and the "slow zone" beyond p85 tinted red.
+**Cycle time, ticket by ticket.** Every dot is a Hibernate issue finished in the last three months - the last 4 weeks in blue, the slowest ticket named (HHH-2975, closed after eleven years), and the "slow zone" beyond p85 tinted red.
 
 ![Cycle time per issue](docs/images/cycle_time_scatter.png)
 
-**Lead time.** From the moment a ticket is created to the moment it's done.
+**Lead time.** From the moment a ticket is created to the moment it's done. The slowest 5% get a grey bar of their own instead of squeezing everything else into the first one.
 
 ![Lead time](docs/images/lead_time.png)
 
-**Cycle time distribution.** The same story as the scatterplot, as a simple histogram.
+**Cycle time distribution.** The same story as the scatterplot, as a histogram with p50 and p85 marked.
 
 ![Cycle time](docs/images/cycle_time.png)
 
@@ -57,7 +57,7 @@ Every chart below comes from real public projects - the [Hibernate ORM](https://
 
 ![Median hours per status](docs/images/cumulative_queue_time.png)
 
-**Days in each status.** Every status of the workflow at a glance, one histogram each.
+**Days in each status.** Every status of the workflow at a glance, one histogram each, the longest waits in grey.
 
 ![Queue time](docs/images/queue_time.png)
 
@@ -79,7 +79,7 @@ Point it at any public Jira, like Hibernate's:
 uv sync
 uv run python -m metrics --anonymous \
   --jira-server https://hibernate.atlassian.net \
-  --jira-jql 'project = HHH AND created >= -60d' \
+  --jira-jql 'project = HHH AND (resolved >= -90d OR resolution = Unresolved AND updated >= -90d)' \
   --testing-statuses "In review, Waiting for review"
 
 open output/report.html
@@ -103,7 +103,7 @@ Then open `output/report.html`.
 - **Curious how much time is real work vs waiting?** Tell it where work happens, e.g. `--active-statuses "In Progress, In Development"` (default: in progress) - that powers the flow-efficiency number in the report: the share of cycle time spent in those statuses, so backlog waiting before work starts doesn't count.
 - Prefer environment variables or a config file? `uv run python -m metrics --help` shows every option.
 
-Tip: let your JQL include both finished and still-open issues - the forecast and aging charts need the open ones.
+Tip: let your JQL include both finished and still-open issues - the forecast and aging charts need the open ones. Select finished issues by when they were resolved, e.g. `resolved >= -90d OR resolution = Unresolved`: a window on `created` leaves out the old issues your team is finishing now and understates throughput, and one on `updated` pulls in issues closed years ago.
 
 ## License
 
