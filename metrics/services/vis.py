@@ -11,6 +11,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.container import BarContainer
 from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator
 
 from .base import BaseService
 
@@ -57,6 +58,9 @@ MIN_ANNOTATED_DROP = 3
 
 TAIL_PERCENTILE = 95
 MAX_BODY_BINS = 20
+# narrowest x axis in days, so one short duration isn't a single full-width bar
+MIN_DURATION_AXIS_DAYS = 7
+GRID_BODY_BINS = 10
 
 
 def split_tail(
@@ -75,13 +79,20 @@ def split_tail(
     return body, tail, cutoff
 
 
-# share of the x axis kept free of body ticks left of the tail bar's label
+# share of the x axis kept free of body ticks left of the tail bar's label;
+# a grid cell is a third as wide, so the same label takes a larger share
 TAIL_TICK_CLEARANCE = 0.08
+GRID_TAIL_TICK_CLEARANCE = 0.2
 
 
-def body_ticks(ticks: list[float], tail_x: float, right: float) -> list[float]:
+def body_ticks(
+    ticks: list[float],
+    tail_x: float,
+    right: float,
+    clearance: float = TAIL_TICK_CLEARANCE,
+) -> list[float]:
     """Keep the body's x ticks that cannot run into the tail bar's tick label."""
-    limit = tail_x - TAIL_TICK_CLEARANCE * right
+    limit = tail_x - clearance * right
     return [t for t in ticks if 0 <= t <= limit]
 
 
@@ -449,6 +460,43 @@ class VisService(BaseService):
         fig.tight_layout()
         self._save_figure(fig, filename)
 
+    def _tail_histogram(
+        self,
+        ax: Axes,
+        days: list[float],
+        *,
+        max_bins: int,
+        label_tail: bool,
+        clearance: float = TAIL_TICK_CLEARANCE,
+    ) -> None:
+        """Histogram whole days up to p95 and draw the slower rest as one bar."""
+        body, tail, cutoff = split_tail(days)
+        # whole-day bins: durations are counted in whole days, and a
+        # fractional width makes neighbouring bars alias between them
+        width = max(1, math.ceil(cutoff / max_bins))
+        edges = [0.5 + width * k for k in range(math.ceil(cutoff / width) + 1)]
+        ax.hist(body, bins=edges, rwidth=0.9, color=SERIES)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
+        if not tail:
+            ax.set_xlim(0, max(edges[-1] + width, MIN_DURATION_AXIS_DAYS))
+            return
+        tail_x = edges[-1] + width
+        bars = ax.bar(tail_x, len(tail), width=width * 0.9, color=INK_MUTED)
+        if label_tail:
+            ax.bar_label(
+                bars,
+                labels=[f"{len(tail)} slower\nup to {max(tail):.0f}d"],
+                padding=3,
+                color=INK_SECONDARY,
+            )
+        right = tail_x + width * 2
+        ax.set_xlim(0, right)
+        ticks = body_ticks(list(ax.get_xticks()), tail_x, right, clearance)
+        ax.set_xticks(
+            [*ticks, tail_x],
+            labels=[f"{t:.0f}" for t in ticks] + [f">{math.floor(cutoff)}"],
+        )
+
     def vis_queue_grid(
         self,
         filename: str,
@@ -466,7 +514,13 @@ class VisService(BaseService):
         )
         flat = [ax for row in axes for ax in row]
         for ax, (status, values) in zip(flat, queue_time.items(), strict=False):
-            ax.hist(values, bins=5, rwidth=0.9, color=SERIES)
+            self._tail_histogram(
+                ax,
+                values,
+                max_bins=GRID_BODY_BINS,
+                label_tail=False,
+                clearance=GRID_TAIL_TICK_CLEARANCE,
+            )
             ax.set_title(status, fontsize=11, color=INK_SECONDARY)
         for ax in flat[len(queue_time) :]:
             ax.set_visible(False)
@@ -486,28 +540,7 @@ class VisService(BaseService):
         """Render a duration histogram with its slowest 5% as a separate bar."""
         fig, ax = plt.subplots()
         if days:
-            body, tail, cutoff = split_tail(days)
-            # whole-day bins: durations are counted in whole days, and a
-            # fractional width makes neighbouring bars alias between them
-            width = max(1, math.ceil(cutoff / MAX_BODY_BINS))
-            edges = [0.5 + width * k for k in range(math.ceil(cutoff / width) + 1)]
-            ax.hist(body, bins=edges, rwidth=0.9, color=SERIES)
-            if tail:
-                tail_x = edges[-1] + width
-                bars = ax.bar(tail_x, len(tail), width=width * 0.9, color=INK_MUTED)
-                ax.bar_label(
-                    bars,
-                    labels=[f"{len(tail)} slower\nup to {max(tail):.0f}d"],
-                    padding=3,
-                    color=INK_SECONDARY,
-                )
-                right = tail_x + width * 2
-                ax.set_xlim(right=right)
-                ticks = body_ticks(list(ax.get_xticks()), tail_x, right)
-                ax.set_xticks(
-                    [*ticks, tail_x],
-                    labels=[f"{t:.0f}" for t in ticks] + [f">{math.floor(cutoff)}"],
-                )
+            self._tail_histogram(ax, days, max_bins=MAX_BODY_BINS, label_tail=True)
             self._percentile_lines(
                 ax,
                 [float(np.percentile(days, p)) for p in PERCENTILES[:2]],

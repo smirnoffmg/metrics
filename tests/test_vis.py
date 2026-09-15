@@ -82,6 +82,15 @@ def test_visservice_vis_queue_grid_creates_file(temp_png_file):
     assert Path(temp_png_file).exists()
 
 
+def test_visservice_vis_queue_grid_with_long_tails_creates_file(temp_png_file):
+    queue_time = {
+        "New": [1.0] * 30 + [6000.0],
+        "In Progress": [2.0, 3.0, 5.0, 8.0] * 10 + [400.0, 900.0],
+    }
+    VisService().vis_queue_grid(temp_png_file, queue_time)
+    assert Path(temp_png_file).exists()
+
+
 def test_biggest_drop_finds_largest_band_decrease():
     df = pd.DataFrame(
         {"New": [5, 5, 2, 2], "In Progress": [0, 1, 1, 0]},
@@ -168,6 +177,16 @@ def test_body_ticks_leave_room_for_the_tail_label():
         100.0,
         200.0,
         300.0,
+        400.0,
+    ]
+
+
+def test_body_ticks_leave_more_room_in_a_narrow_grid_cell():
+    # Kafka's Patch Available cell: "600" ran into ">647"
+    ticks = [0.0, 200.0, 400.0, 600.0, 800.0]
+    assert body_ticks(ticks, tail_x=680.0, right=740.0, clearance=0.2) == [
+        0.0,
+        200.0,
         400.0,
     ]
 
