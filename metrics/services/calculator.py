@@ -144,18 +144,20 @@ def monte_carlo_forecast(  # noqa: PLR0913
     seed: int | None = None,
     now: datetime | None = None,
     focus: float = 1.0,
+    window: int = FORECAST_WINDOW_WEEKS,
 ) -> dict[str, Any]:
     """Simulate clearing the open issues; empty dict when data is insufficient.
 
     focus is the share of the team's throughput spent on these issues: a
     release worked on alongside everything else gets only part of it.
+    window is how many recent weeks of throughput the simulation draws from.
     """
     if not 0 < focus <= 1:
         msg = f"focus must be in (0, 1], got {focus}"
         raise ValueError(msg)
     now = now or datetime.now(tz=UTC)
     weekly = list(throughput.values())
-    samples = np.array(weekly[-FORECAST_WINDOW_WEEKS:], dtype=float) * focus
+    samples = np.array(weekly[-window:], dtype=float) * focus
     backlog = sum(1 for issue in issues if issue.is_open)
     if backlog == 0 or len(samples) < MIN_FORECAST_HISTORY_WEEKS or samples.sum() == 0:
         return {}
@@ -167,7 +169,12 @@ def monte_carlo_forecast(  # noqa: PLR0913
         remaining[active] -= rng.choice(samples, size=int(active.sum()))
         weeks[active] += 1
         active = remaining > 0
-    result: dict[str, Any] = {"weeks": weeks, "backlog": backlog, "focus": focus}
+    result: dict[str, Any] = {
+        "weeks": weeks,
+        "backlog": backlog,
+        "focus": focus,
+        "window": window,
+    }
     for pct in (50, 85, 95):
         value = float(np.percentile(weeks, pct))
         result[f"p{pct}"] = value

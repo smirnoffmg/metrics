@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from functools import cache
+from functools import cache, partial
 from statistics import fmean
 from typing import TYPE_CHECKING, Final
 
@@ -19,11 +19,16 @@ import numpy as np
 from .calculator import FORECAST_WINDOW_WEEKS, MIN_FORECAST_HISTORY_WEEKS
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 BACKTEST_HORIZON_WEEKS: Final[int] = 4
 # short horizons alongside the forecast's own: far more outcomes that do not overlap
 SHORT_HORIZONS_WEEKS: Final[tuple[int, ...]] = (4, 8)
+# windows of recent weeks the forecast may draw from, chosen per team by backtest
+CANDIDATE_WINDOWS_WEEKS: Final[tuple[int, ...]] = (12, 26, 52)
+# below this, even a far-off share of held promises can be chance
+MIN_INDEPENDENT_OUTCOMES: Final[int] = 10
+CRPS_TIE_TOLERANCE: Final[float] = 0.05
 BACKTEST_SIMULATIONS: Final[int] = 10_000
 
 
@@ -137,6 +142,62 @@ def backtest_forecast(  # noqa: PLR0913
             ),
         )
     return results
+
+
+def backtest_windows(
+    throughput_at: Callable[[datetime], dict[str, int]],
+    weeks: Sequence[str],
+    *,
+    windows: Sequence[int] = CANDIDATE_WINDOWS_WEEKS,
+    horizons: Sequence[int] = SHORT_HORIZONS_WEEKS,
+    seed: int | None = None,
+) -> dict[int, dict[int, list[Backtest]]]:
+    """Backtest the forecast drawing from each window, over each horizon."""
+    throughput_at = cache(throughput_at)
+    return {
+        window: {
+            horizon: backtest_forecast(
+                throughput_at,
+                weeks,
+                horizon=horizon,
+                predictor=partial(bootstrap_totals, window=window),
+                seed=seed,
+            )
+            for horizon in horizons
+        }
+        for window in windows
+    }
+
+
+def choose_window(
+    by_window: Mapping[int, Sequence[BacktestSummary]],
+    default: int = FORECAST_WINDOW_WEEKS,
+    min_independent: int = MIN_INDEPENDENT_OUTCOMES,
+) -> int:
+    """Shortest window scoring about the best CRPS at the longest judgeable horizon.
+
+    Long horizons are where the forecast's promise lives, but a week apart
+    they share most outcomes; without enough independent ones anywhere, the
+    default stays. Windows within CRPS_TIE_TOLERANCE of the best count as a
+    tie, broken toward recent pace: a sliver of CRPS is noise, not a reason
+    to forecast from a year-old pace.
+    """
+    horizons = {s.horizon for summaries in by_window.values() for s in summaries}
+    for horizon in sorted(horizons, reverse=True):
+        scores = {
+            window: s.mean_crps
+            for window, summaries in by_window.items()
+            for s in summaries
+            if s.horizon == horizon and s.independent >= min_independent
+        }
+        if len(scores) == len(by_window):
+            best = min(scores.values())
+            return min(
+                window
+                for window, score in scores.items()
+                if score <= best * (1 + CRPS_TIE_TOLERANCE)
+            )
+    return default
 
 
 def summarize_backtests(results: Sequence[Backtest]) -> BacktestSummary | None:

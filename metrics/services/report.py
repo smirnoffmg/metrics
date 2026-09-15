@@ -12,7 +12,7 @@ import pandas as pd
 from .base import BaseService
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from .backtest import BacktestSummary
     from .stats import StuckRow, Tile
@@ -111,18 +111,27 @@ def _agent_table_html(comparison: pd.DataFrame | None) -> str:
     )
 
 
-def _backtest_table_html(summaries: Sequence[BacktestSummary]) -> str:
-    if not summaries:
+def _backtest_table_html(
+    by_window: Mapping[int, Sequence[BacktestSummary]],
+    used: int | None,
+) -> str:
+    if not by_window:
         return ""
+
+    def window_cell(window: int) -> str:
+        return f"<b>{window} weeks, used</b>" if window == used else f"{window} weeks"
+
     body = "".join(
-        f"<tr><td>{s.horizon} weeks</td><td>{s.count}</td><td>{s.independent}</td>"
+        f"<tr><td>{window_cell(window)}</td><td>{s.horizon} weeks</td>"
+        f"<td>{s.count}</td><td>{s.independent}</td>"
         f"<td>{s.held_85:.0%}</td><td>{s.kolmogorov:.2f}</td>"
         f"<td>{s.mean_crps:.1f}</td></tr>"
+        for window, summaries in by_window.items()
         for s in summaries
     )
     return (
-        "<section><h2>Forecast backtest by horizon</h2>"
-        "<table><tr><th>Horizon</th><th>Past forecasts</th>"
+        "<section><h2>Forecast backtest by window and horizon</h2>"
+        "<table><tr><th>Window</th><th>Horizon</th><th>Past forecasts</th>"
         "<th>Independent outcomes</th><th>85% forecasts held</th>"
         "<th>Kolmogorov distance</th><th>Mean CRPS</th></tr>"
         f"{body}</table></section>"
@@ -140,7 +149,8 @@ class ReportService(BaseService):
         fragments: Sequence[str] = (),
         stuck_rows: Sequence[StuckRow] = (),
         agent_comparison: pd.DataFrame | None = None,
-        backtests: Sequence[BacktestSummary] = (),
+        backtests: Mapping[int, Sequence[BacktestSummary]] | None = None,
+        forecast_window: int | None = None,
     ) -> None:
         """Write the report: tiles, interactive charts, stuck table, PNGs."""
         sections = []
@@ -156,7 +166,7 @@ class ReportService(BaseService):
             fragments="\n".join(f"<section>{f}</section>" for f in fragments),
             stuck_table=_stuck_table_html(stuck_rows),
             agent_table=_agent_table_html(agent_comparison),
-            backtest_table=_backtest_table_html(backtests),
+            backtest_table=_backtest_table_html(backtests or {}, forecast_window),
             sections="\n".join(sections),
             generated_at=datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC"),
         )

@@ -422,3 +422,17 @@ def test_time_metrics_keep_the_tail_of_the_distribution():
     assert cycle_times(issues) == [59, 30]
     assert lead_times(issues) == [59, 30]
     assert queue_times(issues) == {"In Progress": [59, 30]}
+
+
+def test_monte_carlo_forecast_draws_from_the_window_of_recent_weeks():
+    throughput = {f"2024W{w:02d}": 100 if w <= 6 else 2 for w in range(1, 13)}  # noqa: PLR2004
+    result = monte_carlo_forecast(
+        _open_issues(6),
+        throughput,
+        simulations=100,
+        seed=1,
+        now=datetime(2026, 7, 15, tzinfo=UTC),
+        window=6,
+    )
+    assert result["p95"] == 3.0  # noqa: PLR2004
+    assert result["window"] == 6  # noqa: PLR2004

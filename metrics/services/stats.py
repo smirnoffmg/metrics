@@ -6,14 +6,14 @@ from dataclasses import dataclass
 from statistics import fmean, median
 from typing import TYPE_CHECKING, Any
 
+from .backtest import MIN_INDEPENDENT_OUTCOMES
+
 if TYPE_CHECKING:
     import pandas as pd
 
     from .backtest import BacktestSummary
 
 CLAIMED_CHANCE = 0.85
-# below this, even a far-off share of held promises can be chance
-MIN_INDEPENDENT_OUTCOMES = 10
 
 
 @dataclass(frozen=True)

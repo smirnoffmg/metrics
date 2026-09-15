@@ -8,7 +8,7 @@ import os
 import re
 import sys
 from datetime import timedelta
-from functools import cache
+from functools import cache, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,11 +16,16 @@ import click
 from dependency_injector import providers
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from datetime import datetime
 
     import pandas as pd
 
     from metrics.entity import Issue
+    from metrics.services.backtest import Backtest, BacktestSummary
+
+    # window -> horizon -> past forecasts
+    BacktestRuns = dict[int, dict[int, list[Backtest]]]
 from dependency_injector.wiring import Provide, inject
 
 from metrics.consts import (
@@ -46,12 +51,15 @@ from metrics.services import (  # noqa: TC001
     VisService,
 )
 from metrics.services.backtest import (
-    SHORT_HORIZONS_WEEKS,
-    BacktestSummary,
+    MIN_INDEPENDENT_OUTCOMES,
     backtest_forecast,
+    backtest_windows,
+    bootstrap_totals,
+    choose_window,
     summarize_backtests,
 )
 from metrics.services.calculator import (
+    FORECAST_WINDOW_WEEKS,
     aging_wip,
     assignee_load,
     cumulative_flow,
@@ -596,7 +604,10 @@ def calculate_metrics(  # noqa: PLR0913
     cfd = cumulative_flow(issues, now=now)
     aging = aging_wip(issues, now=now)
     throughput = weekly_throughput(issues, now=now)
-    forecast = monte_carlo_forecast(issues, throughput, now=now)
+    window = FORECAST_WINDOW_WEEKS
+    if any(issue.is_open for issue in issues):
+        window, throughput_at, runs = _choose_forecast_window(repo, throughput)
+    forecast = monte_carlo_forecast(issues, throughput, now=now, window=window)
     load, handoffs = assignee_load(issues)
 
     report_images = _render_static_charts(
@@ -617,13 +628,15 @@ def calculate_metrics(  # noqa: PLR0913
     if not aging.empty:
         fragments.append(interactive_service.aging_fragment(aging))
     backtest = None
-    backtests: list[BacktestSummary] = []
+    backtests: dict[int, list[BacktestSummary]] = {}
     if forecast:
         fragments.append(interactive_service.forecast_fragment(forecast))
+        # a forecast needs open issues, so the window backtests have run
         backtest, backtests, chart = _report_backtest(
-            repo,
-            throughput,
+            throughput_at,
+            list(throughput),
             forecast,
+            runs,
             vis_service,
             output_dir,
         )
@@ -639,6 +652,7 @@ def calculate_metrics(  # noqa: PLR0913
             throughput,
             now,
             forecast_focus,
+            window,
         )
         scope_tile = scope_forecast_tile(
             scope_forecast,
@@ -687,43 +701,80 @@ def calculate_metrics(  # noqa: PLR0913
         stuck_rows=build_stuck_rows(aging, server_url),
         agent_comparison=comparison,
         backtests=backtests,
+        forecast_window=window if backtests else None,
     )
     click.echo(f"Report: {report_path}")
 
 
-def _report_backtest(
+def _choose_forecast_window(
     repo: JiraIssuesRepository,
     throughput: dict[str, int],
-    forecast: dict[str, Any],
-    vis_service: VisService,
-    output_dir: Path,
-) -> tuple[Tile, list[BacktestSummary], Path | None]:
-    """Replay past forecasts over short horizons and the one the forecast promises."""
-    horizon = max(1, round(forecast["p85"]))
-    # the horizons rebuild the same Mondays, so each moment is converted once
+) -> tuple[int, Callable[[datetime], dict[str, int]], BacktestRuns]:
+    """Pick the window of recent weeks whose past forecasts scored best."""
+    # every window and horizon rebuilds the same Mondays: convert each moment once
     throughput_at = cache(lambda at: weekly_throughput(repo.issues_at(at), now=at))
-    runs = {
-        h: backtest_forecast(throughput_at, list(throughput), horizon=h)
-        for h in sorted({*SHORT_HORIZONS_WEEKS, horizon})
+    runs = backtest_windows(throughput_at, list(throughput))
+    by_window = {
+        window: list(_summaries(by_horizon).values())
+        for window, by_horizon in runs.items()
     }
-    summaries = {
-        h: summary
-        for h, results in runs.items()
+    window = choose_window(by_window)
+    evidence = max(
+        (s.independent for summaries in by_window.values() for s in summaries),
+        default=0,
+    )
+    if evidence >= MIN_INDEPENDENT_OUTCOMES:
+        click.echo(f"Forecast window: {window} weeks, chosen by backtest")
+    else:
+        click.echo(
+            f"Forecast window: {window} weeks; {evidence} independent backtest"
+            " outcomes are too few to choose another",
+        )
+    return window, throughput_at, runs
+
+
+def _summaries(by_horizon: dict[int, list[Backtest]]) -> dict[int, BacktestSummary]:
+    return {
+        horizon: summary
+        for horizon, results in by_horizon.items()
         if (summary := summarize_backtests(results)) is not None
     }
+
+
+def _report_backtest(  # noqa: PLR0913
+    throughput_at: Callable[[datetime], dict[str, int]],
+    weeks: list[str],
+    forecast: dict[str, Any],
+    runs: BacktestRuns,
+    vis_service: VisService,
+    output_dir: Path,
+) -> tuple[Tile, dict[int, list[BacktestSummary]], Path | None]:
+    """Add the forecast's own horizon to its window's backtests, and chart them."""
+    window = forecast["window"]
+    horizon = max(1, round(forecast["p85"]))
+    if horizon not in runs[window]:
+        runs[window][horizon] = backtest_forecast(
+            throughput_at,
+            weeks,
+            horizon=horizon,
+            predictor=partial(bootstrap_totals, window=window),
+        )
+    by_window = {w: _summaries(by_horizon) for w, by_horizon in runs.items()}
+    summaries = by_window[window]
     for h, summary in summaries.items():
         click.echo(
             f"Backtest: {summary.held_85:.0%} of {summary.count} past 85% forecasts"
             f" over {h} weeks held ({summary.independent} independent);"
             f" Kolmogorov distance {summary.kolmogorov:.2f}",
         )
+    tables = {w: list(s.values()) for w, s in by_window.items()}
     tile = backtest_tile(summaries.get(horizon))
     if horizon not in summaries:
         click.echo(f"Backtest: too little history for {horizon}-week forecasts")
-        return tile, list(summaries.values()), None
+        return tile, tables, None
     chart = output_dir / "forecast_backtest.png"
-    vis_service.vis_backtest(str(chart), runs, summaries, horizon)
-    return tile, list(summaries.values()), chart
+    vis_service.vis_backtest(str(chart), runs[window], summaries, horizon)
+    return tile, tables, chart
 
 
 def _report_delivery(  # noqa: PLR0913
@@ -777,15 +828,22 @@ def _report_delivery(  # noqa: PLR0913
     return tiles, comparison, charts
 
 
-def _forecast_scope(
+def _forecast_scope(  # noqa: PLR0913
     jql: str,
     scope: list[Issue],
     throughput: dict[str, int],
     now: datetime,
     focus: float,
+    window: int,
 ) -> tuple[dict[str, Any], str]:
     """Forecast the issues a forecast query named, with a one-line summary."""
-    result = monte_carlo_forecast(scope, throughput, now=now, focus=focus)
+    result = monte_carlo_forecast(
+        scope,
+        throughput,
+        now=now,
+        focus=focus,
+        window=window,
+    )
     open_count = sum(1 for issue in scope if issue.is_open)
     # the query on its own line: a chart title cannot fit a long one beside the rest
     summary = f"{jql}\n{open_count} of {len(scope)} issues open"

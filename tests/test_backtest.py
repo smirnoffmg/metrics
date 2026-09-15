@@ -10,8 +10,11 @@ import pytest
 
 from metrics.services.backtest import (
     Backtest,
+    BacktestSummary,
     backtest_forecast,
+    backtest_windows,
     bootstrap_totals,
+    choose_window,
     crps,
     kolmogorov_distance,
     probability_integral,
@@ -184,3 +187,64 @@ def test_backtest_origins_are_utc_mondays():
     weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(9)]
     backtest_forecast(known_at, weeks, horizon=1, min_history=7, seed=1)
     assert seen[0] == datetime(2024, 2, 26, tzinfo=UTC)
+
+
+def _scored(horizon: int, independent: int, crps_mean: float) -> BacktestSummary:
+    return BacktestSummary(
+        horizon=horizon,
+        count=50,
+        independent=independent,
+        held_85=0.85,
+        kolmogorov=0.1,
+        mean_crps=crps_mean,
+    )
+
+
+def test_choose_window_by_crps_at_the_longest_horizon_with_enough_evidence():
+    by_window = {
+        12: [_scored(4, 24, 50.0), _scored(8, 12, 95.0)],
+        52: [_scored(4, 24, 55.0), _scored(8, 12, 63.0)],
+    }
+    assert choose_window(by_window, default=12, min_independent=10) == 52  # noqa: PLR2004
+
+
+def test_choose_window_falls_back_to_a_shorter_horizon():
+    by_window = {
+        12: [_scored(4, 24, 50.0), _scored(8, 9, 95.0)],
+        52: [_scored(4, 24, 55.0), _scored(8, 9, 63.0)],
+    }
+    assert choose_window(by_window, default=26, min_independent=10) == 12  # noqa: PLR2004
+
+
+def test_choose_window_keeps_the_default_without_enough_evidence():
+    by_window = {12: [_scored(4, 3, 50.0)], 52: [_scored(4, 3, 40.0)]}
+    assert choose_window(by_window, default=12, min_independent=10) == 12  # noqa: PLR2004
+
+
+def test_choose_window_needs_every_window_scored_at_the_horizon():
+    by_window = {12: [_scored(8, 12, 95.0)], 52: []}
+    assert choose_window(by_window, default=26, min_independent=10) == 26  # noqa: PLR2004
+
+
+def test_backtest_windows_replays_each_window_over_each_horizon():
+    weekly = [2] * 30
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(30)]
+    runs = backtest_windows(
+        _throughput_known_at(weekly),
+        weeks,
+        windows=(12, 26),
+        horizons=(4, 8),
+        seed=1,
+    )
+    assert sorted(runs) == [12, 26]
+    assert sorted(runs[12]) == [4, 8]
+    assert all(r.actual == 8 for r in runs[26][4])  # noqa: PLR2004
+
+
+def test_choose_window_prefers_the_shortest_of_windows_scoring_about_the_same():
+    by_window = {
+        12: [_scored(8, 12, 116.8)],
+        26: [_scored(8, 12, 103.3)],
+        52: [_scored(8, 12, 102.1)],
+    }
+    assert choose_window(by_window, default=12, min_independent=10) == 26  # noqa: PLR2004
