@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from metrics.services.vis import VisService, biggest_drop
+from metrics.services.vis import VisService, biggest_drop, split_tail
 
 
 def test_visservice_vis_df_creates_file(temp_png_file):
@@ -132,4 +132,29 @@ def test_visservice_vis_assignee_load_creates_file(temp_png_file):
         },
     )
     VisService().vis_assignee_load(temp_png_file, df, handoffs=[2, 1, 0])
+    assert Path(temp_png_file).exists()
+
+
+def test_split_tail_keeps_the_slow_issues_apart_from_the_body():
+    days = [1.0] * 19 + [400.0]
+    body, tail, cutoff = split_tail(days)
+    assert body == [1.0] * 19
+    assert tail == [400.0]
+    assert 1.0 < cutoff < 400.0  # noqa: PLR2004
+
+
+def test_split_tail_without_a_tail():
+    body, tail, _ = split_tail([3.0, 3.0, 3.0])
+    assert body == [3.0, 3.0, 3.0]
+    assert tail == []
+
+
+def test_visservice_vis_duration_histogram_creates_file(temp_png_file):
+    days = [1.0, 2.0, 2.0, 3.0, 5.0, 8.0, 13.0, 21.0, 34.0, 400.0]
+    VisService().vis_duration_histogram(temp_png_file, days, x_label="days")
+    assert Path(temp_png_file).exists()
+
+
+def test_visservice_vis_duration_histogram_handles_no_data(temp_png_file):
+    VisService().vis_duration_histogram(temp_png_file, [], x_label="days")
     assert Path(temp_png_file).exists()

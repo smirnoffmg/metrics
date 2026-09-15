@@ -55,6 +55,26 @@ GRID_COLS = 3
 MIN_ANNOTATED_DROP = 3
 
 
+TAIL_PERCENTILE = 95
+MAX_BODY_BINS = 20
+
+
+def split_tail(
+    values: list[float],
+    percentile: int = TAIL_PERCENTILE,
+) -> tuple[list[float], list[float], float]:
+    """Split durations at a percentile into (body, tail, cutoff).
+
+    A few very slow issues stretch a histogram's axis until every other issue
+    shares one bar; drawn apart, the tail stays visible without flattening
+    the body.
+    """
+    cutoff = float(np.percentile(values, percentile))
+    body = [v for v in values if v <= cutoff]
+    tail = [v for v in values if v > cutoff]
+    return body, tail, cutoff
+
+
 def fold_rare_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Fold the smallest columns into "Other" to stay within 8 hues."""
     if len(df.columns) <= MAX_HUES:
@@ -208,9 +228,9 @@ class VisService(BaseService):
         *,
         vertical: bool = False,
     ) -> None:
-        """Draw p50/p85/p95 reference lines labeled through the legend."""
+        """Draw percentile reference lines, styled in p50/p85/p95 order."""
         for style, value, label in zip(
-            PERCENTILE_STYLES,
+            PERCENTILE_STYLES[: len(values)],
             values,
             labels,
             strict=True,
@@ -444,6 +464,47 @@ class VisService(BaseService):
         fig.supxlabel("days")
         fig.supylabel("number of issues")
         fig.tight_layout()
+        self._save_figure(fig, filename)
+
+    def vis_duration_histogram(
+        self,
+        filename: str,
+        days: list[float],
+        x_label: str = "days",
+        y_label: str = "number of issues",
+    ) -> None:
+        """Render a duration histogram with its slowest 5% as a separate bar."""
+        fig, ax = plt.subplots()
+        if days:
+            body, tail, cutoff = split_tail(days)
+            # whole-day bins: durations are counted in whole days, and a
+            # fractional width makes neighbouring bars alias between them
+            width = max(1, math.ceil(cutoff / MAX_BODY_BINS))
+            edges = [0.5 + width * k for k in range(math.ceil(cutoff / width) + 1)]
+            ax.hist(body, bins=edges, rwidth=0.9, color=SERIES)
+            if tail:
+                tail_x = edges[-1] + width
+                bars = ax.bar(tail_x, len(tail), width=width * 0.9, color=INK_MUTED)
+                ax.bar_label(
+                    bars,
+                    labels=[f"{len(tail)} slower\nup to {max(tail):.0f}d"],
+                    padding=3,
+                    color=INK_SECONDARY,
+                )
+                ax.set_xlim(right=tail_x + width * 2)
+                ticks = [t for t in ax.get_xticks() if 0 <= t < edges[-1]]
+                ax.set_xticks(
+                    [*ticks, tail_x],
+                    labels=[f"{t:.0f}" for t in ticks] + [f">{math.floor(cutoff)}"],
+                )
+            self._percentile_lines(
+                ax,
+                [float(np.percentile(days, p)) for p in PERCENTILES[:2]],
+                [f"p{p} = {np.percentile(days, p):.0f}d" for p in PERCENTILES[:2]],
+                vertical=True,
+            )
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
         self._save_figure(fig, filename)
 
     def vis_array_like(

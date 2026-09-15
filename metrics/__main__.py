@@ -407,24 +407,23 @@ def _render_static_charts(  # noqa: PLR0913
     handoffs: list[int],
 ) -> list[Path]:
     charts = []
-    histograms = (
-        ("lead_time", metrics_service.get_lead_time(), "days"),
-        ("cycle_time", metrics_service.get_cycle_time(), "days"),
-        (
-            "return_to_testing",
-            metrics_service.get_return_to_testing(),
-            "returns to testing",
-        ),
+    durations = (
+        ("lead_time", metrics_service.get_lead_time()),
+        ("cycle_time", metrics_service.get_cycle_time()),
     )
-    for name, values, x_label in histograms:
+    for name, days in durations:
         path = output_dir / f"{name}.png"
-        vis_service.vis_array_like(
-            str(path),
-            values,
-            x_label=x_label,
-            y_label="number of issues",
-        )
+        vis_service.vis_duration_histogram(str(path), days)
         charts.append(path)
+
+    path = output_dir / "return_to_testing.png"
+    vis_service.vis_array_like(
+        str(path),
+        metrics_service.get_return_to_testing(),
+        x_label="returns to testing",
+        y_label="number of issues",
+    )
+    charts.append(path)
 
     path = output_dir / "throughput.png"
     vis_service.vis_df(str(path), throughput, x_label="weeks", y_label="throughput")
