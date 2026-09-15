@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from statistics import fmean
 from typing import TYPE_CHECKING, Final
@@ -28,6 +29,41 @@ MIN_FORECAST_HISTORY_WEEKS: Final[int] = 6
 # enough that a team's pace from years ago doesn't forecast today's backlog.
 FORECAST_WINDOW_WEEKS: Final[int] = 12
 CFD_MAX_DAILY_SPAN: Final[int] = 180
+
+
+@dataclass(frozen=True)
+class Pace:
+    """Which past weeks a forecast draws from, and how likely each one is.
+
+    Either a window of the latest weeks, equally likely, or every week weighted
+    by recency: each half-life back halves a week's chance of being drawn.
+    """
+
+    window: int | None = None
+    half_life: float | None = None
+
+    @property
+    def label(self) -> str:
+        """Name the pace for the report."""
+        if self.half_life is not None:
+            return f"half-life {self.half_life:g} weeks"
+        return f"last {self.window} weeks"
+
+
+DEFAULT_PACE: Final[Pace] = Pace(window=FORECAST_WINDOW_WEEKS)
+
+
+def pace_draws(
+    weekly: Sequence[float],
+    pace: Pace,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Weeks a forecast draws from and each one's chance; None means equal chances."""
+    if pace.half_life is None:
+        return np.asarray(weekly[-(pace.window or len(weekly)) :], dtype=float), None
+    samples = np.asarray(weekly, dtype=float)
+    age = np.arange(len(samples))[::-1]
+    weights = 0.5 ** (age / pace.half_life)
+    return samples, weights / weights.sum()
 
 
 def cycle_times(issues: Sequence[Issue], timeslot: int = ONE_DAY) -> list[float]:
@@ -144,20 +180,21 @@ def monte_carlo_forecast(  # noqa: PLR0913
     seed: int | None = None,
     now: datetime | None = None,
     focus: float = 1.0,
-    window: int = FORECAST_WINDOW_WEEKS,
+    pace: Pace = DEFAULT_PACE,
 ) -> dict[str, Any]:
     """Simulate clearing the open issues; empty dict when data is insufficient.
 
     focus is the share of the team's throughput spent on these issues: a
     release worked on alongside everything else gets only part of it.
-    window is how many recent weeks of throughput the simulation draws from.
+    pace is which past weeks of throughput the simulation draws from.
     """
     if not 0 < focus <= 1:
         msg = f"focus must be in (0, 1], got {focus}"
         raise ValueError(msg)
     now = now or datetime.now(tz=UTC)
     weekly = list(throughput.values())
-    samples = np.array(weekly[-window:], dtype=float) * focus
+    samples, chances = pace_draws(weekly, pace)
+    samples = samples * focus
     backlog = sum(1 for issue in issues if issue.is_open)
     if backlog == 0 or len(samples) < MIN_FORECAST_HISTORY_WEEKS or samples.sum() == 0:
         return {}
@@ -166,17 +203,39 @@ def monte_carlo_forecast(  # noqa: PLR0913
     remaining = np.full(simulations, float(backlog))
     active = remaining > 0
     while active.any():
-        remaining[active] -= rng.choice(samples, size=int(active.sum()))
+        remaining[active] -= rng.choice(samples, size=int(active.sum()), p=chances)
         weeks[active] += 1
         active = remaining > 0
-    result: dict[str, Any] = {
-        "weeks": weeks,
-        "backlog": backlog,
-        "focus": focus,
-        "window": window,
-    }
+    return _with_percentiles(
+        {"weeks": weeks, "backlog": backlog, "focus": focus, "pace": pace},
+        now,
+    )
+
+
+def recalibrate_forecast(
+    forecast: dict[str, Any],
+    past_us: Sequence[float],
+    now: datetime,
+) -> dict[str, Any]:
+    """Correct weeks to clear the backlog by the u-plot G of past throughput forecasts.
+
+    Past u values rate throughput over a horizon, and the backlog is cleared by
+    week k exactly when throughput over k weeks reaches it, so
+    P*(W <= k) = 1 - G(1 - P(W <= k)); one horizon's G stands in for every k.
+    """
+    weeks = np.asarray(forecast["weeks"], dtype=float)
+    levels = (np.arange(len(weeks)) + 0.5) / len(weeks)
+    g_inverse = np.quantile(np.asarray(past_us, dtype=float), 1 - levels)
+    corrected = np.quantile(weeks, 1 - g_inverse)
+    return _with_percentiles(
+        {**forecast, "weeks": corrected, "recalibrated": True},
+        now,
+    )
+
+
+def _with_percentiles(result: dict[str, Any], now: datetime) -> dict[str, Any]:
     for pct in (50, 85, 95):
-        value = float(np.percentile(weeks, pct))
+        value = float(np.percentile(result["weeks"], pct))
         result[f"p{pct}"] = value
         result[f"p{pct}_date"] = (now + timedelta(weeks=value)).date()
     return result

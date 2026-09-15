@@ -84,7 +84,7 @@ def test_report_draws_an_unjudged_delta_in_muted_ink(tmp_path):
     assert '<div class="delta" style="color:#898781">only 3 independent</div>' in html
 
 
-def test_report_renders_the_backtest_by_window_and_horizon(tmp_path):
+def test_report_renders_the_backtest_by_pace_and_horizon(tmp_path):
     out = tmp_path / "report.html"
 
     def summary(horizon: int, crps_mean: float) -> BacktestSummary:
@@ -95,19 +95,29 @@ def test_report_renders_the_backtest_by_window_and_horizon(tmp_path):
             held_85=0.904,
             kolmogorov=0.161,
             mean_crps=crps_mean,
+            bias_p=0.0661,
+            trend_p=None,
         )
 
     ReportService().render(
         str(out),
         tiles=[],
         images=[],
-        backtests={12: [summary(4, 61.3)], 52: [summary(4, 40.6)]},
-        forecast_window=52,
+        backtests={
+            "last 12 weeks": [summary(4, 61.3)],
+            "half-life 4 weeks, recalibrated": [summary(4, 40.6)],
+        },
+        used_model="half-life 4 weeks, recalibrated",
+        backtest_note="No evidence of drift.",
     )
     html = out.read_text(encoding="utf-8")
-    assert "Forecast backtest by window and horizon" in html
+    assert "Forecast backtest by model and horizon" in html
     assert (
-        "<tr><td>12 weeks</td><td>4 weeks</td><td>97</td><td>25</td><td>90%</td>"
-        "<td>0.16</td><td>61.3</td></tr>"
+        "<tr><td>last 12 weeks</td><td>4 weeks</td><td>97</td><td>25</td><td>90%</td>"
+        "<td>0.16</td><td>61.3</td><td>0.066</td><td>n/a</td></tr>"
     ) in html
-    assert "<tr><td><b>52 weeks, used</b></td><td>4 weeks</td>" in html
+    assert (
+        "<tr><td><b>half-life 4 weeks, recalibrated, used</b></td><td>4 weeks</td>"
+        in html
+    )
+    assert "<p>No evidence of drift.</p>" in html

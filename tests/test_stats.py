@@ -13,6 +13,8 @@ from metrics.services.stats import (
     build_delivery_tiles,
     build_headline_tiles,
     build_stuck_rows,
+    diagnose_backtest,
+    recalibration_note,
     scope_forecast_tile,
 )
 
@@ -192,3 +194,105 @@ def test_build_headline_tiles_puts_the_backtest_beside_the_forecast():
         backtest=backtest,
     )
     assert tiles[2] is backtest
+
+
+def _tested(
+    horizon: int,
+    independent: int,
+    bias_p: float | None,
+    trend_p: float | None,
+) -> BacktestSummary:
+    return BacktestSummary(
+        horizon=horizon,
+        count=90,
+        independent=independent,
+        held_85=0.78,
+        kolmogorov=0.2,
+        mean_crps=50.0,
+        bias_p=bias_p,
+        trend_p=trend_p,
+    )
+
+
+def test_diagnosis_finds_drift_at_any_horizon_with_enough_outcomes():
+    note = diagnose_backtest(
+        [
+            _tested(4, 24, bias_p=0.052, trend_p=0.035),
+            _tested(8, 12, bias_p=0.013, trend_p=0.298),
+            _tested(41, 2, bias_p=0.5, trend_p=0.0),
+        ],
+    )
+    assert note == (
+        "4-week forecast errors drift over time (y-plot p = 0.035): the team's pace"
+        " changes, so correcting forecasts by their past errors would not hold."
+    )
+
+
+def test_diagnosis_of_steady_bias():
+    note = diagnose_backtest(
+        [
+            _tested(4, 24, bias_p=0.2, trend_p=0.4),
+            _tested(8, 12, bias_p=0.011, trend_p=0.26),
+        ],
+    )
+    assert note == (
+        "8-week forecasts err the same way throughout (u-plot p = 0.011), with no"
+        " sign of drift at 4 or 8 weeks:"
+        " the case for recalibrating them by past errors."
+    )
+
+
+def test_diagnosis_without_evidence_of_bias_or_drift():
+    note = diagnose_backtest(
+        [
+            _tested(4, 24, bias_p=0.4, trend_p=0.3),
+            _tested(8, 12, bias_p=0.6, trend_p=0.2),
+        ],
+    )
+    assert note == (
+        "No sign that forecasts over 4 or 8 weeks are biased or drift over time"
+        " (lowest u-plot p = 0.400, lowest y-plot p = 0.200)."
+    )
+
+
+def test_diagnosis_needs_enough_independent_outcomes():
+    note = diagnose_backtest([_tested(8, 3, bias_p=0.01, trend_p=0.01)])
+    assert (
+        note
+        == "Too few independent outcomes to test forecast errors for bias or drift."
+    )
+
+
+def _scored_crps(held_85: float, crps_mean: float) -> BacktestSummary:
+    return BacktestSummary(
+        horizon=8,
+        count=74,
+        independent=10,
+        held_85=held_85,
+        kolmogorov=0.2,
+        mean_crps=crps_mean,
+    )
+
+
+def test_recalibration_note_when_the_correction_scores_worse():
+    note = recalibration_note(_scored_crps(0.51, 37.6), _scored_crps(0.80, 40.2))
+    assert note == (
+        "Recalibrated by their past errors, 8-week forecasts kept 80% of their 85%"
+        " promises instead of 51% but scored a worse CRPS (40.2 against 37.6),"
+        " so the forecast is not recalibrated."
+    )
+
+
+def test_recalibration_note_when_the_correction_scores_better():
+    note = recalibration_note(_scored_crps(0.51, 40.2), _scored_crps(0.80, 37.6))
+    assert note == (
+        "Recalibrated by their past errors, 8-week forecasts kept 80% of their 85%"
+        " promises instead of 51% and scored a better CRPS (37.6 against 40.2),"
+        " so the forecast is recalibrated."
+    )
+
+
+def test_build_headline_tiles_say_when_the_forecast_is_recalibrated():
+    forecast = {"p85_date": date(2027, 6, 29), "recalibrated": True}
+    tiles = build_headline_tiles(_scatter_df(), pd.DataFrame(), forecast, {}, 0.5)
+    assert tiles[1] == Tile("85% of backlog done, recalibrated", "by 29 Jun 2027")

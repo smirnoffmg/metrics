@@ -9,6 +9,7 @@ import pytest
 
 from metrics.entity.issues import Issue, StatusTransition
 from metrics.services.calculator import (
+    Pace,
     aging_wip,
     assignee_load,
     cumulative_flow,
@@ -18,7 +19,9 @@ from metrics.services.calculator import (
     lead_times,
     median_queue_hours,
     monte_carlo_forecast,
+    pace_draws,
     queue_times,
+    recalibrate_forecast,
     returns_to_testing,
     weekly_throughput,
 )
@@ -432,7 +435,69 @@ def test_monte_carlo_forecast_draws_from_the_window_of_recent_weeks():
         simulations=100,
         seed=1,
         now=datetime(2026, 7, 15, tzinfo=UTC),
-        window=6,
+        pace=Pace(window=6),
     )
     assert result["p95"] == 3.0  # noqa: PLR2004
-    assert result["window"] == 6  # noqa: PLR2004
+    assert result["pace"] == Pace(window=6)
+
+
+def test_monte_carlo_forecast_follows_recent_weeks_with_a_short_half_life():
+    throughput = {f"2024W{w:02d}": 100 if w <= 11 else 2 for w in range(1, 13)}  # noqa: PLR2004
+    result = monte_carlo_forecast(
+        _open_issues(6),
+        throughput,
+        simulations=100,
+        seed=1,
+        now=datetime(2026, 7, 15, tzinfo=UTC),
+        pace=Pace(half_life=0.05),
+    )
+    assert result["p50"] == 3.0  # noqa: PLR2004
+
+
+def test_pace_draws_equally_from_a_window_of_recent_weeks():
+    samples, chances = pace_draws([1, 2, 3, 4], Pace(window=3))
+    assert list(samples) == [2, 3, 4]
+    assert chances is None
+
+
+def test_pace_draws_every_week_halving_its_chance_each_half_life():
+    samples, chances = pace_draws([1, 2, 3], Pace(half_life=1))
+    assert list(samples) == [1, 2, 3]
+    assert chances is not None
+    assert list(chances) == pytest.approx([1 / 7, 2 / 7, 4 / 7])
+
+
+def test_pace_labels():
+    assert Pace(window=12).label == "last 12 weeks"
+    assert Pace(half_life=4).label == "half-life 4 weeks"
+
+
+def _spread_forecast() -> dict:
+    throughput = {f"2024W{w:02d}": 1 if w % 2 else 5 for w in range(1, 13)}
+    return monte_carlo_forecast(
+        _open_issues(30),
+        throughput,
+        simulations=2000,
+        seed=1,
+        now=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+
+
+def test_recalibrated_forecast_with_every_past_outcome_at_the_median():
+    raw = _spread_forecast()
+    result = recalibrate_forecast(
+        raw, [0.5] * 20, now=datetime(2026, 7, 15, tzinfo=UTC)
+    )
+    assert result["p85"] == raw["p50"]
+    assert result["p95"] == raw["p50"]
+    assert result["recalibrated"] is True
+
+
+def test_recalibrated_forecast_after_optimistic_past_takes_longer():
+    raw = _spread_forecast()
+    # outcomes below every simulated throughput: the backlog takes the longest
+    result = recalibrate_forecast(
+        raw, [0.0] * 20, now=datetime(2026, 7, 15, tzinfo=UTC)
+    )
+    assert result["p50"] == float(raw["weeks"].max())
+    assert result["p50_date"] > raw["p85_date"]

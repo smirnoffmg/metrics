@@ -111,30 +111,37 @@ def _agent_table_html(comparison: pd.DataFrame | None) -> str:
     )
 
 
+def _p_value(p: float | None) -> str:
+    return "n/a" if p is None else f"{p:.3f}"
+
+
 def _backtest_table_html(
-    by_window: Mapping[int, Sequence[BacktestSummary]],
-    used: int | None,
+    by_model: Mapping[str, Sequence[BacktestSummary]],
+    used: str | None,
+    note: str | None,
 ) -> str:
-    if not by_window:
+    if not by_model:
         return ""
 
-    def window_cell(window: int) -> str:
-        return f"<b>{window} weeks, used</b>" if window == used else f"{window} weeks"
+    def model_cell(model: str) -> str:
+        return f"<b>{model}, used</b>" if model == used else model
 
     body = "".join(
-        f"<tr><td>{window_cell(window)}</td><td>{s.horizon} weeks</td>"
+        f"<tr><td>{model_cell(model)}</td><td>{s.horizon} weeks</td>"
         f"<td>{s.count}</td><td>{s.independent}</td>"
         f"<td>{s.held_85:.0%}</td><td>{s.kolmogorov:.2f}</td>"
-        f"<td>{s.mean_crps:.1f}</td></tr>"
-        for window, summaries in by_window.items()
+        f"<td>{s.mean_crps:.1f}</td><td>{_p_value(s.bias_p)}</td>"
+        f"<td>{_p_value(s.trend_p)}</td></tr>"
+        for model, summaries in by_model.items()
         for s in summaries
     )
     return (
-        "<section><h2>Forecast backtest by window and horizon</h2>"
-        "<table><tr><th>Window</th><th>Horizon</th><th>Past forecasts</th>"
+        "<section><h2>Forecast backtest by model and horizon</h2>"
+        "<table><tr><th>Model</th><th>Horizon</th><th>Past forecasts</th>"
         "<th>Independent outcomes</th><th>85% forecasts held</th>"
-        "<th>Kolmogorov distance</th><th>Mean CRPS</th></tr>"
-        f"{body}</table></section>"
+        "<th>Kolmogorov distance</th><th>Mean CRPS</th>"
+        "<th>Bias p (u-plot)</th><th>Drift p (y-plot)</th></tr>"
+        f"{body}</table>{f'<p>{note}</p>' if note else ''}</section>"
     )
 
 
@@ -149,8 +156,9 @@ class ReportService(BaseService):
         fragments: Sequence[str] = (),
         stuck_rows: Sequence[StuckRow] = (),
         agent_comparison: pd.DataFrame | None = None,
-        backtests: Mapping[int, Sequence[BacktestSummary]] | None = None,
-        forecast_window: int | None = None,
+        backtests: Mapping[str, Sequence[BacktestSummary]] | None = None,
+        used_model: str | None = None,
+        backtest_note: str | None = None,
     ) -> None:
         """Write the report: tiles, interactive charts, stuck table, PNGs."""
         sections = []
@@ -166,7 +174,11 @@ class ReportService(BaseService):
             fragments="\n".join(f"<section>{f}</section>" for f in fragments),
             stuck_table=_stuck_table_html(stuck_rows),
             agent_table=_agent_table_html(agent_comparison),
-            backtest_table=_backtest_table_html(backtests or {}, forecast_window),
+            backtest_table=_backtest_table_html(
+                backtests or {},
+                used_model,
+                backtest_note,
+            ),
             sections="\n".join(sections),
             generated_at=datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC"),
         )

@@ -24,8 +24,8 @@ if TYPE_CHECKING:
     from metrics.entity import Issue
     from metrics.services.backtest import Backtest, BacktestSummary
 
-    # window -> horizon -> past forecasts
-    BacktestRuns = dict[int, dict[int, list[Backtest]]]
+    # pace -> horizon -> past forecasts
+    BacktestRuns = dict["Pace", dict[int, list[Backtest]]]
 from dependency_injector.wiring import Provide, inject
 
 from metrics.consts import (
@@ -52,15 +52,19 @@ from metrics.services import (  # noqa: TC001
 )
 from metrics.services.backtest import (
     MIN_INDEPENDENT_OUTCOMES,
+    MIN_RECALIBRATION_HISTORY,
     backtest_forecast,
-    backtest_windows,
+    backtest_paces,
     bootstrap_totals,
-    choose_window,
+    choose_pace,
     judged_summary,
+    recalibration_helps,
+    steady_bias,
     summarize_backtests,
 )
 from metrics.services.calculator import (
-    FORECAST_WINDOW_WEEKS,
+    DEFAULT_PACE,
+    Pace,
     aging_wip,
     assignee_load,
     cumulative_flow,
@@ -71,6 +75,7 @@ from metrics.services.calculator import (
     median_queue_hours,
     monte_carlo_forecast,
     queue_times,
+    recalibrate_forecast,
     returns_to_testing,
     weekly_throughput,
 )
@@ -88,6 +93,8 @@ from metrics.services.stats import (
     build_delivery_tiles,
     build_headline_tiles,
     build_stuck_rows,
+    diagnose_backtest,
+    recalibration_note,
     scope_forecast_tile,
 )
 
@@ -96,6 +103,10 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
+
+# a fixed seed: tests of past forecasts near their threshold must not flip between
+# two reports built from the same snapshot
+BACKTEST_SEED = 0
 
 GITLAB_CONFIG_KEYS = (
     "gitlab_url",
@@ -605,10 +616,19 @@ def calculate_metrics(  # noqa: PLR0913
     cfd = cumulative_flow(issues, now=now)
     aging = aging_wip(issues, now=now)
     throughput = weekly_throughput(issues, now=now)
-    window = FORECAST_WINDOW_WEEKS
+    pace = DEFAULT_PACE
+    past_us = None
     if any(issue.is_open for issue in issues):
-        window, throughput_at, runs = _choose_forecast_window(repo, throughput)
-    forecast = monte_carlo_forecast(issues, throughput, now=now, window=window)
+        pace, throughput_at, runs = _choose_forecast_pace(repo, throughput)
+        recalibrated, past_us = _choose_recalibration(
+            throughput_at,
+            list(throughput),
+            pace,
+            runs,
+        )
+    forecast = monte_carlo_forecast(issues, throughput, now=now, pace=pace)
+    if forecast and past_us is not None:
+        forecast = recalibrate_forecast(forecast, past_us, now)
     load, handoffs = assignee_load(issues)
 
     report_images = _render_static_charts(
@@ -629,15 +649,18 @@ def calculate_metrics(  # noqa: PLR0913
     if not aging.empty:
         fragments.append(interactive_service.aging_fragment(aging))
     backtest = None
-    backtests: dict[int, list[BacktestSummary]] = {}
+    backtests: dict[str, list[BacktestSummary]] = {}
+    used_model = None
+    backtest_note = None
     if forecast:
         fragments.append(interactive_service.forecast_fragment(forecast))
-        # a forecast needs open issues, so the window backtests have run
-        backtest, backtests, chart = _report_backtest(
+        # a forecast needs open issues, so the pace backtests have run
+        backtest, backtests, used_model, backtest_note, chart = _report_backtest(
             throughput_at,
             list(throughput),
             forecast,
             runs,
+            recalibrated,
             vis_service,
             output_dir,
         )
@@ -653,7 +676,8 @@ def calculate_metrics(  # noqa: PLR0913
             throughput,
             now,
             forecast_focus,
-            window,
+            pace,
+            past_us,
         )
         scope_tile = scope_forecast_tile(
             scope_forecast,
@@ -702,36 +726,36 @@ def calculate_metrics(  # noqa: PLR0913
         stuck_rows=build_stuck_rows(aging, server_url),
         agent_comparison=comparison,
         backtests=backtests,
-        forecast_window=window if backtests else None,
+        used_model=used_model,
+        backtest_note=backtest_note,
     )
     click.echo(f"Report: {report_path}")
 
 
-def _choose_forecast_window(
+def _choose_forecast_pace(
     repo: JiraIssuesRepository,
     throughput: dict[str, int],
-) -> tuple[int, Callable[[datetime], dict[str, int]], BacktestRuns]:
-    """Pick the window of recent weeks whose past forecasts scored best."""
-    # every window and horizon rebuilds the same Mondays: convert each moment once
+) -> tuple[Pace, Callable[[datetime], dict[str, int]], BacktestRuns]:
+    """Pick the pace of past weeks whose past forecasts scored best."""
+    # every pace and horizon rebuilds the same Mondays: convert each moment once
     throughput_at = cache(lambda at: weekly_throughput(repo.issues_at(at), now=at))
-    runs = backtest_windows(throughput_at, list(throughput))
-    by_window = {
-        window: list(_summaries(by_horizon).values())
-        for window, by_horizon in runs.items()
+    runs = backtest_paces(throughput_at, list(throughput), seed=BACKTEST_SEED)
+    by_pace = {
+        pace: list(_summaries(by_horizon).values()) for pace, by_horizon in runs.items()
     }
-    window = choose_window(by_window)
+    pace = choose_pace(by_pace)
     evidence = max(
-        (s.independent for summaries in by_window.values() for s in summaries),
+        (s.independent for summaries in by_pace.values() for s in summaries),
         default=0,
     )
     if evidence >= MIN_INDEPENDENT_OUTCOMES:
-        click.echo(f"Forecast window: {window} weeks, chosen by backtest")
+        click.echo(f"Forecast pace: {pace.label}, chosen by backtest")
     else:
         click.echo(
-            f"Forecast window: {window} weeks; {evidence} independent backtest"
+            f"Forecast pace: {pace.label}; {evidence} independent backtest"
             " outcomes are too few to choose another",
         )
-    return window, throughput_at, runs
+    return pace, throughput_at, runs
 
 
 def _summaries(by_horizon: dict[int, list[Backtest]]) -> dict[int, BacktestSummary]:
@@ -742,41 +766,94 @@ def _summaries(by_horizon: dict[int, list[Backtest]]) -> dict[int, BacktestSumma
     }
 
 
+def _choose_recalibration(
+    throughput_at: Callable[[datetime], dict[str, int]],
+    weeks: list[str],
+    pace: Pace,
+    runs: BacktestRuns,
+) -> tuple[dict[int, list[Backtest]] | None, list[float] | None]:
+    """Recalibrate past forecasts when their errors are steady, and use it if it scores.
+
+    Returns the recalibrated backtests, if tried, and the raw u values to
+    recalibrate the forecast with, if it scored better than raw.
+    """
+    raw = list(_summaries(runs[pace]).values())
+    judged = judged_summary(raw)
+    if judged is None or not steady_bias(raw):
+        return None, None
+    recalibrated = {
+        horizon: backtest_forecast(
+            throughput_at,
+            weeks,
+            horizon=horizon,
+            predictor=partial(bootstrap_totals, pace=pace),
+            seed=BACKTEST_SEED,
+            recalibrate_after=MIN_RECALIBRATION_HISTORY,
+        )
+        for horizon in runs[pace]
+    }
+    scored = _summaries(recalibrated).get(judged.horizon)
+    if scored is None or not recalibration_helps(judged, scored):
+        return recalibrated, None
+    return recalibrated, [r.u for r in runs[pace][judged.horizon]]
+
+
 def _report_backtest(  # noqa: PLR0913
     throughput_at: Callable[[datetime], dict[str, int]],
     weeks: list[str],
     forecast: dict[str, Any],
     runs: BacktestRuns,
+    recalibrated: dict[int, list[Backtest]] | None,
     vis_service: VisService,
     output_dir: Path,
-) -> tuple[Tile, dict[int, list[BacktestSummary]], Path | None]:
-    """Add the forecast's own horizon to its window's backtests, and chart them."""
-    window = forecast["window"]
+) -> tuple[Tile, dict[str, list[BacktestSummary]], str, str | None, Path | None]:
+    """Add the forecast's own horizon to the backtests of the model it uses, chart them.
+
+    Returns the tile, summaries by model name, the model used, the note on its
+    errors and the chart.
+    """
+    pace = forecast["pace"]
+    applied = bool(forecast.get("recalibrated"))
+    used_runs = recalibrated if applied and recalibrated is not None else runs[pace]
+    used_model = f"{pace.label}, recalibrated" if applied else pace.label
     horizon = max(1, round(forecast["p85"]))
-    if horizon not in runs[window]:
-        runs[window][horizon] = backtest_forecast(
+    if horizon not in used_runs:
+        used_runs[horizon] = backtest_forecast(
             throughput_at,
             weeks,
             horizon=horizon,
-            predictor=partial(bootstrap_totals, window=window),
+            predictor=partial(bootstrap_totals, pace=pace),
+            seed=BACKTEST_SEED,
+            recalibrate_after=MIN_RECALIBRATION_HISTORY if applied else None,
         )
-    by_window = {w: _summaries(by_horizon) for w, by_horizon in runs.items()}
-    summaries = by_window[window]
+    tables = {
+        p.label: list(_summaries(by_horizon).values()) for p, by_horizon in runs.items()
+    }
+    if recalibrated is not None:
+        tables[f"{pace.label}, recalibrated"] = list(_summaries(recalibrated).values())
+    raw = _summaries(runs[pace])
+    summaries = _summaries(used_runs)
     for h, summary in summaries.items():
         click.echo(
             f"Backtest: {summary.held_85:.0%} of {summary.count} past 85% forecasts"
             f" over {h} weeks held ({summary.independent} independent);"
             f" Kolmogorov distance {summary.kolmogorov:.2f}",
         )
-    tables = {w: list(s.values()) for w, s in by_window.items()}
     if horizon not in summaries:
         click.echo(f"Backtest: too little history for {horizon}-week forecasts")
     judged = judged_summary(list(summaries.values()))
     if judged is None:
-        return backtest_tile(None), tables, None
+        return backtest_tile(None), tables, used_model, None, None
+    note = diagnose_backtest(list(raw.values()))
+    raw_judged = judged_summary(list(raw.values()))
+    if recalibrated is not None and raw_judged is not None:
+        scored = _summaries(recalibrated).get(raw_judged.horizon)
+        if scored is not None:
+            note = f"{note} {recalibration_note(raw_judged, scored)}"
+    click.echo(f"Backtest: {note}")
     chart = output_dir / "forecast_backtest.png"
-    vis_service.vis_backtest(str(chart), runs[window], summaries, judged.horizon)
-    return backtest_tile(judged), tables, chart
+    vis_service.vis_backtest(str(chart), used_runs, summaries, judged.horizon)
+    return backtest_tile(judged), tables, used_model, note, chart
 
 
 def _report_delivery(  # noqa: PLR0913
@@ -836,7 +913,8 @@ def _forecast_scope(  # noqa: PLR0913
     throughput: dict[str, int],
     now: datetime,
     focus: float,
-    window: int,
+    pace: Pace,
+    past_us: list[float] | None,
 ) -> tuple[dict[str, Any], str]:
     """Forecast the issues a forecast query named, with a one-line summary."""
     result = monte_carlo_forecast(
@@ -844,8 +922,10 @@ def _forecast_scope(  # noqa: PLR0913
         throughput,
         now=now,
         focus=focus,
-        window=window,
+        pace=pace,
     )
+    if result and past_us is not None:
+        result = recalibrate_forecast(result, past_us, now)
     open_count = sum(1 for issue in scope if issue.is_open)
     # the query on its own line: a chart title cannot fit a long one beside the rest
     summary = f"{jql}\n{open_count} of {len(scope)} issues open"

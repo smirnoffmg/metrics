@@ -33,6 +33,7 @@ dev = [
     "pandas-stubs>=3.0.3.260530",
     "types-pyyaml>=6.0.12.20260518",
     "types-seaborn>=0.13.2.20260518",
+    "scipy-stubs>=1.17.1.5",
 ]
 
 [build-system]

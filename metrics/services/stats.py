@@ -6,9 +6,16 @@ from dataclasses import dataclass
 from statistics import fmean, median
 from typing import TYPE_CHECKING, Any
 
-from .backtest import MIN_INDEPENDENT_OUTCOMES
+from .backtest import (
+    MIN_INDEPENDENT_OUTCOMES,
+    SIGNIFICANCE,
+    judgeable_summaries,
+    recalibration_helps,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import pandas as pd
 
     from .backtest import BacktestSummary
@@ -64,6 +71,8 @@ def _split_halves(scatter: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 def _forecast_tile(forecast: dict[str, Any], label: str) -> Tile:
     if not forecast:
         return Tile(label, "n/a")
+    if forecast.get("recalibrated"):
+        label = f"{label}, recalibrated"
     return Tile(label, f"by {forecast['p85_date']:%d %b %Y}")
 
 
@@ -134,6 +143,57 @@ def backtest_tile(summary: BacktestSummary | None) -> Tile:
         "as promised" if held >= CLAIMED_CHANCE else "fewer than promised",
         held >= CLAIMED_CHANCE,
     )
+
+
+def diagnose_backtest(summaries: Sequence[BacktestSummary]) -> str:
+    """Say whether past forecast errors drift or keep a steady bias, drift first.
+
+    Fenton and Pfleeger recalibrate forecasts from past errors only when those
+    errors are stationary, so drift at any horizon with enough independent
+    outcomes rules correction out; a short horizon's test has the most of them.
+    """
+    tested = judgeable_summaries(summaries)
+    if not tested:
+        return "Too few independent outcomes to test forecast errors for bias or drift."
+    drift = min(tested, key=lambda s: s.trend_p or 0.0)
+    bias = min(tested, key=lambda s: s.bias_p or 0.0)
+    horizons = _horizons(tested)
+    if drift.trend_p is not None and drift.trend_p < SIGNIFICANCE:
+        return (
+            f"{drift.horizon}-week forecast errors drift over time"
+            f" (y-plot p = {drift.trend_p:.3f}): the team's pace changes,"
+            " so correcting forecasts by their past errors would not hold."
+        )
+    if bias.bias_p is not None and bias.bias_p < SIGNIFICANCE:
+        return (
+            f"{bias.horizon}-week forecasts err the same way throughout"
+            f" (u-plot p = {bias.bias_p:.3f}), with no sign of drift at {horizons}:"
+            " the case for recalibrating them by past errors."
+        )
+    return (
+        f"No sign that forecasts over {horizons} are biased or drift over time"
+        f" (lowest u-plot p = {bias.bias_p:.3f},"
+        f" lowest y-plot p = {drift.trend_p:.3f})."
+    )
+
+
+def recalibration_note(raw: BacktestSummary, recalibrated: BacktestSummary) -> str:
+    """Say what recalibrating past forecasts did, and whether the forecast is."""
+    helps = recalibration_helps(raw, recalibrated)
+    score = "and scored a better" if helps else "but scored a worse"
+    return (
+        f"Recalibrated by their past errors, {raw.horizon}-week forecasts kept"
+        f" {recalibrated.held_85:.0%} of their 85% promises instead of"
+        f" {raw.held_85:.0%} {score} CRPS"
+        f" ({recalibrated.mean_crps:.1f} against {raw.mean_crps:.1f}),"
+        f" so the forecast is {'' if helps else 'not '}recalibrated."
+    )
+
+
+def _horizons(summaries: Sequence[BacktestSummary]) -> str:
+    weeks = [str(s.horizon) for s in sorted(summaries, key=lambda s: s.horizon)]
+    listed = weeks[0] if len(weeks) == 1 else f"{', '.join(weeks[:-1])} or {weeks[-1]}"
+    return f"{listed} weeks"
 
 
 def build_stuck_rows(
