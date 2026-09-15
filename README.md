@@ -21,7 +21,7 @@ Every chart below comes from real public projects - the [Hibernate ORM](https://
 
 ### When will it be done?
 
-**Monte Carlo forecast.** 316 open Hibernate issues at the pace of the last 12 finished weeks: half the simulations clear them by 24 August 2027, 85% by 12 October 2027 - real dates, not story points.
+**Monte Carlo forecast.** 151 open Hibernate issues at the pace of the last 12 finished weeks: half the simulations clear them by 17 November 2026, 85% by 24 November - real dates, not story points.
 
 ![Monte Carlo forecast](docs/images/forecast.png)
 
@@ -31,7 +31,7 @@ Every chart below comes from real public projects - the [Hibernate ORM](https://
 
 ### How fast do tickets finish?
 
-**Cycle time, ticket by ticket.** Every dot is a Hibernate issue finished in the last three months - the last 4 weeks in blue, the slowest ticket named (HHH-2975, closed after eleven years), and the "slow zone" beyond p85 tinted red.
+**Cycle time, ticket by ticket.** Every dot is a Hibernate issue finished in the last three months - the last 4 weeks in blue, the slowest ticket named (HHH-3007, finished after more than twelve years), and the "slow zone" beyond p85 tinted red.
 
 ![Cycle time per issue](docs/images/cycle_time_scatter.png)
 
