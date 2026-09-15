@@ -48,10 +48,33 @@ class FakeCloudJira:
 
     deploymentType = "Cloud"  # noqa: N815 - mirrors the jira client attribute
 
-    def __init__(self, issues: list[dict], page_size: int = 2) -> None:
+    def __init__(
+        self,
+        issues: list[dict],
+        page_size: int = 2,
+        changelogs: dict[str, list[dict]] | None = None,
+    ) -> None:
         self.issues = issues
         self.page_size = page_size
         self.search_calls: list[dict[str, Any]] = []
+        self.changelogs = changelogs or {}
+        self.changelog_calls: list[str] = []
+
+    def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Mimics GET issue/{key}/changelog: oldest first, startAt pagination."""
+        key = path.removeprefix("issue/").removesuffix("/changelog")
+        self.changelog_calls.append(key)
+        params = params or {}
+        start = params.get("startAt", 0)
+        limit = params.get("maxResults", 100)
+        full = self.changelogs[key]
+        return {
+            "startAt": start,
+            "maxResults": limit,
+            "total": len(full),
+            "isLast": start + limit >= len(full),
+            "values": full[start : start + limit],
+        }
 
     def enhanced_search_issues(self, jql_str: str, **kwargs: Any) -> Any:  # noqa: ARG002
         self.search_calls.append(kwargs)

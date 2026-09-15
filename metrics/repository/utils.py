@@ -129,11 +129,35 @@ def get_issues_cloud(j: JIRA, jql: str) -> list[dict]:
             next_page_token = response.get("nextPageToken")
             if not next_page_token:
                 break
+        for issue in result:
+            _complete_changelog(j, issue)
     except JIRAError as err:
         logger.exception("Failed to fetch issues from Jira Cloud")
         msg = f"Failed to fetch issues from Jira Cloud: {err}"
         raise RuntimeError(msg) from err
     return result
+
+
+def _complete_changelog(j: JIRA, issue: dict) -> None:
+    """Replace a Cloud changelog cut to its latest entries with the whole one.
+
+    Cloud search returns at most the 100 most recent changelog entries, so a
+    long-lived issue loses the transitions that set when work started. The
+    jira client has no public call for the changelog endpoint, hence _get_json.
+    """
+    changelog = issue["changelog"]
+    if changelog.get("total", 0) <= len(changelog["histories"]):
+        return
+    histories: list[dict] = []
+    while True:
+        page = j._get_json(  # noqa: SLF001
+            f"issue/{issue['key']}/changelog",
+            params={"startAt": len(histories), "maxResults": 100},
+        )
+        histories.extend(page["values"])
+        if page.get("isLast", True) or not page["values"]:
+            break
+    changelog["histories"] = histories
 
 
 def get_issues(j: JIRA, jql: str) -> list[dict]:

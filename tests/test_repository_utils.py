@@ -198,3 +198,36 @@ def test_container_provides_services():
     assert metrics_service.throughput_calculator is not None
     assert metrics_service.cumulative_queue_time_calculator is not None
     assert metrics_service.return_to_testing_calculator is not None
+
+
+def _history(day: int) -> dict:
+    return {
+        "created": f"2024-01-01T00:00:{day:02d}.000+0000",
+        "items": [{"field": "status", "fromString": "A", "toString": "B"}],
+    }
+
+
+def test_get_issues_cloud_fetches_changelogs_cut_to_the_latest_entries():
+    full = [_history(i % 60) for i in range(130)]
+    truncated = make_raw_issue("LONG-1")
+    truncated["changelog"] = {
+        "startAt": 0,
+        "maxResults": 100,
+        "total": 130,
+        "histories": full[30:],
+    }
+    complete = make_raw_issue("SHORT-1")
+    complete["changelog"] = {
+        "startAt": 0,
+        "maxResults": 2,
+        "total": 2,
+        "histories": full[:2],
+    }
+    fake = FakeCloudJira([truncated, complete], changelogs={"LONG-1": full})
+
+    result = get_issues_cloud(fake, "project=TEST")
+
+    by_key = {item["key"]: item for item in result}
+    assert by_key["LONG-1"]["changelog"]["histories"] == full
+    assert by_key["SHORT-1"]["changelog"]["histories"] == full[:2]
+    assert fake.changelog_calls == ["LONG-1", "LONG-1"]

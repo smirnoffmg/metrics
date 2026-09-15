@@ -24,6 +24,9 @@ if TYPE_CHECKING:
     from metrics.repository import BaseIssuesRepository
 
 MIN_FORECAST_HISTORY_WEEKS: Final[int] = 6
+# A quarter of weekly throughput: long enough to smooth single weeks, short
+# enough that a team's pace from years ago doesn't forecast today's backlog.
+FORECAST_WINDOW_WEEKS: Final[int] = 12
 CFD_MAX_DAILY_SPAN: Final[int] = 180
 
 
@@ -86,25 +89,35 @@ class QueueTimeCalculator(MetricCalculator):
 class ThroughputCalculator(MetricCalculator):
     """Calculate weekly throughput of completed issues."""
 
-    def calculate(self) -> dict[str, int]:
-        """Calculate issues completed per ISO week, gap weeks zero-filled."""
+    def calculate(self, now: datetime | None = None) -> dict[str, int]:
+        """Count issues completed per finished ISO week, up to the one before now.
+
+        The current week is left out, since a partial week reads as a slump;
+        weeks with no completions up to now count as zero.
+        """
+        now = now or datetime.now(tz=UTC)
+        current_week = _week_start(now.date())
         counts: dict[str, int] = defaultdict(int)
         finish_dates = []
         for issue in self.repo.all():
-            if issue.last_finish_status_at:
-                counts[issue.last_finish_status_at.strftime("%GW%V")] += 1
-                finish_dates.append(issue.last_finish_status_at.date())
+            finished = issue.last_finish_status_at
+            if finished and _week_start(finished.date()) < current_week:
+                counts[finished.strftime("%GW%V")] += 1
+                finish_dates.append(finished.date())
         if not counts:
             return {}
 
-        week = date.fromisocalendar(*min(finish_dates).isocalendar()[:2], 1)
-        last_week = date.fromisocalendar(*max(finish_dates).isocalendar()[:2], 1)
+        week = _week_start(min(finish_dates))
         result: dict[str, int] = {}
-        while week <= last_week:
+        while week < current_week:
             key = week.strftime("%GW%V")
             result[key] = counts.get(key, 0)
             week += timedelta(weeks=1)
         return result
+
+
+def _week_start(day: date) -> date:
+    return date.fromisocalendar(*day.isocalendar()[:2], 1)
 
 
 class CumulativeQueueTimeCalculator(MetricCalculator):
@@ -170,10 +183,8 @@ class MonteCarloForecastCalculator(MetricCalculator):
     ) -> dict[str, Any]:
         """Simulate backlog completion; empty dict when data is insufficient."""
         now = now or datetime.now(tz=UTC)
-        samples = np.array(
-            list(self.throughput_calculator.calculate().values()),
-            dtype=float,
-        )
+        weekly = list(self.throughput_calculator.calculate(now=now).values())
+        samples = np.array(weekly[-FORECAST_WINDOW_WEEKS:], dtype=float)
         backlog = sum(1 for issue in self.repo.all() if issue.is_open)
         if (
             backlog == 0

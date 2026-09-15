@@ -79,22 +79,42 @@ def _repo_with_finishes(*finished_at):
 
 
 def test_throughput_calculator_uses_iso_year_for_week_key():
-    repo = _repo_with_finishes(datetime(2025, 12, 29, 12, 0, 0))
-    result = ThroughputCalculator(repo).calculate()
+    repo = _repo_with_finishes(datetime(2025, 12, 29, 12, 0, 0, tzinfo=UTC))
+    result = ThroughputCalculator(repo).calculate(now=datetime(2026, 1, 5, tzinfo=UTC))
     assert result == {"2026W01": 1}
 
 
 def test_throughput_calculator_sorted_with_gap_weeks_zero_filled():
     repo = _repo_with_finishes(
-        datetime(2024, 1, 17, 12, 0, 0),
-        datetime(2024, 1, 3, 12, 0, 0),
-        datetime(2024, 1, 3, 18, 0, 0),
+        datetime(2024, 1, 17, 12, 0, 0, tzinfo=UTC),
+        datetime(2024, 1, 3, 12, 0, 0, tzinfo=UTC),
+        datetime(2024, 1, 3, 18, 0, 0, tzinfo=UTC),
     )
-    result = ThroughputCalculator(repo).calculate()
+    result = ThroughputCalculator(repo).calculate(now=datetime(2024, 1, 22, tzinfo=UTC))
     assert list(result.items()) == [
         ("2024W01", 2),
         ("2024W02", 0),
         ("2024W03", 1),
+    ]
+
+
+def test_throughput_leaves_out_the_week_still_in_progress():
+    repo = _repo_with_finishes(
+        datetime(2024, 1, 3, 12, 0, 0, tzinfo=UTC),
+        datetime(2024, 1, 16, 12, 0, 0, tzinfo=UTC),
+    )
+    result = ThroughputCalculator(repo).calculate(now=datetime(2024, 1, 17, tzinfo=UTC))
+    assert list(result.items()) == [("2024W01", 1), ("2024W02", 0)]
+
+
+def test_throughput_counts_idle_weeks_up_to_now():
+    repo = _repo_with_finishes(datetime(2024, 1, 3, 12, 0, 0, tzinfo=UTC))
+    result = ThroughputCalculator(repo).calculate(now=datetime(2024, 1, 31, tzinfo=UTC))
+    assert list(result.items()) == [
+        ("2024W01", 1),
+        ("2024W02", 0),
+        ("2024W03", 0),
+        ("2024W04", 0),
     ]
 
 
@@ -172,7 +192,7 @@ class StubThroughput:
     def __init__(self, weekly):
         self.weekly = weekly
 
-    def calculate(self):
+    def calculate(self, now=None):  # noqa: ARG002
         return self.weekly
 
 
@@ -262,6 +282,18 @@ def test_flow_efficiency_skips_issues_closed_without_being_started():
 
 def test_flow_efficiency_empty_repo():
     assert FlowEfficiencyCalculator(StubRepo([])).calculate() == 0.0
+
+
+def test_monte_carlo_samples_only_recent_weeks():
+    old_pace = {f"2023W{w:02d}": 10 for w in range(1, 31)}
+    recent_pace = {f"2024W{w:02d}": 1 for w in range(1, 13)}
+    throughput = StubThroughput({**old_pace, **recent_pace})
+    calc = MonteCarloForecastCalculator(StubRepo(_open_issues(6)), throughput)
+    result = calc.calculate(
+        simulations=100, seed=1, now=datetime(2024, 3, 25, tzinfo=UTC)
+    )
+    assert result["p50"] == 6.0  # noqa: PLR2004
+    assert result["p95"] == 6.0  # noqa: PLR2004
 
 
 def test_monte_carlo_empty_without_backlog():
