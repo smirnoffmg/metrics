@@ -69,19 +69,28 @@ def weekly_throughput(
     The current week is left out, since a partial week reads as a slump;
     weeks with no completions up to now count as zero.
     """
+    finished = [
+        issue.last_finish_status_at.date()
+        for issue in issues
+        if issue.last_finish_status_at
+    ]
+    return weekly_counts(finished, now)
+
+
+def weekly_counts(days: list[date], now: datetime | None = None) -> dict[str, int]:
+    """Count days per finished ISO week, from the first up to the week before now."""
     now = now or datetime.now(tz=UTC)
     current_week = _week_start(now.date())
     counts: dict[str, int] = defaultdict(int)
-    finish_dates = []
-    for issue in issues:
-        finished = issue.last_finish_status_at
-        if finished and _week_start(finished.date()) < current_week:
-            counts[finished.strftime("%GW%V")] += 1
-            finish_dates.append(finished.date())
+    counted = []
+    for day in days:
+        if _week_start(day) < current_week:
+            counts[day.strftime("%GW%V")] += 1
+            counted.append(day)
     if not counts:
         return {}
 
-    week = _week_start(min(finish_dates))
+    week = _week_start(min(counted))
     result: dict[str, int] = {}
     while week < current_week:
         key = week.strftime("%GW%V")
