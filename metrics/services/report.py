@@ -74,7 +74,7 @@ def _stuck_table_html(rows: Sequence[StuckRow]) -> str:
         for row in rows
     )
     return (
-        "<section><h2>Longest-waiting open issues</h2>"
+        "<section><h2>Longest-waiting work in progress</h2>"
         "<table><tr><th>Issue</th><th>Current status</th><th>Days in status</th></tr>"
         f"{body}</table></section>"
     )

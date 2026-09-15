@@ -46,7 +46,7 @@ def test_build_headline_tiles_values_and_deltas():
     assert tiles == [
         Tile("Cycle time p50", "4.0d", "↓ 6.0d", delta_good=True),
         Tile("85% of backlog done", "by 01 Mar 2024", None, delta_good=None),
-        Tile("Open issues", "3", None, delta_good=None),
+        Tile("Work in progress", "3", None, delta_good=None),
         Tile("Throughput", "4.0/wk", "↑ 2.0", delta_good=True),
         Tile("Flow efficiency", "25%", None, delta_good=None),
     ]

@@ -176,9 +176,14 @@ class StubThroughput:
         return self.weekly
 
 
-def _open_issues(n):
+def _open_issues(n, started_at=None):
     return [
-        Issue(key=f"O-{i}", status="New", created_at=datetime(2024, 1, 1, tzinfo=UTC))
+        Issue(
+            key=f"O-{i}",
+            status="New",
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+            started_at=started_at,
+        )
         for i in range(n)
     ]
 
@@ -207,6 +212,7 @@ def test_flow_efficiency_share_of_active_time():
         key="A",
         status="Done",
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        started_at=datetime(2024, 1, 1, tzinfo=UTC),
         last_finish_status_at=datetime(2024, 1, 9, tzinfo=UTC),
         statuses_x_periods={
             "In Progress": timedelta(days=2),
@@ -224,6 +230,34 @@ def test_flow_efficiency_share_of_active_time():
         active_statuses=["In Progress"],
     )
     assert calc.calculate() == 0.25  # noqa: PLR2004
+
+
+def test_flow_efficiency_ignores_waiting_before_work_started():
+    done = Issue(
+        key="A",
+        status="Done",
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        started_at=datetime(2024, 4, 1, tzinfo=UTC),
+        last_finish_status_at=datetime(2024, 4, 3, tzinfo=UTC),
+        statuses_x_periods={
+            "Open": timedelta(days=91),
+            "In Progress": timedelta(days=2),
+        },
+    )
+    calc = FlowEfficiencyCalculator(StubRepo([done]), active_statuses=["In Progress"])
+    assert calc.calculate() == 1.0
+
+
+def test_flow_efficiency_skips_issues_closed_without_being_started():
+    closed_from_backlog = Issue(
+        key="A",
+        status="Done",
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        last_finish_status_at=datetime(2024, 1, 9, tzinfo=UTC),
+        statuses_x_periods={"Open": timedelta(days=8)},
+    )
+    repo = StubRepo([closed_from_backlog, _finished_after(2)])
+    assert FlowEfficiencyCalculator(repo).calculate() == 1.0
 
 
 def test_flow_efficiency_empty_repo():
@@ -248,6 +282,7 @@ def test_aging_wip_ages_open_issues_in_current_status():
         key="A",
         status="In Progress",
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        started_at=datetime(2024, 1, 2, tzinfo=UTC),
         status_transitions=[
             StatusTransition(
                 at=datetime(2024, 1, 2, tzinfo=UTC),
@@ -256,10 +291,23 @@ def test_aging_wip_ages_open_issues_in_current_status():
             ),
         ],
     )
-    fresh = Issue(
+    in_review = Issue(
         key="B",
+        status="Review",
+        created_at=datetime(2024, 1, 3, tzinfo=UTC),
+        started_at=datetime(2024, 1, 5, tzinfo=UTC),
+        status_transitions=[
+            StatusTransition(
+                at=datetime(2024, 1, 5, tzinfo=UTC),
+                from_status="New",
+                to_status="Review",
+            ),
+        ],
+    )
+    never_started = Issue(
+        key="D",
         status="New",
-        created_at=datetime(2024, 1, 5, tzinfo=UTC),
+        created_at=datetime(2023, 1, 1, tzinfo=UTC),
     )
     done = Issue(
         key="C",
@@ -268,9 +316,11 @@ def test_aging_wip_ages_open_issues_in_current_status():
         last_finish_status_at=datetime(2024, 1, 5, tzinfo=UTC),
         statuses_x_periods={"In Progress": timedelta(days=4)},
     )
-    df = AgingWipCalculator(StubRepo([stuck, fresh, done])).calculate(now=now)
+    df = AgingWipCalculator(
+        StubRepo([stuck, in_review, never_started, done]),
+    ).calculate(now=now)
     assert list(df["key"]) == ["A", "B"]
-    assert list(df["status"]) == ["In Progress", "New"]
+    assert list(df["status"]) == ["In Progress", "Review"]
     assert list(df["age_days"]) == [8.0, 5.0]
     assert df.iloc[0]["p85_days"] == 4.0  # noqa: PLR2004
     assert pd.isna(df.iloc[1]["p85_days"])
@@ -346,7 +396,27 @@ def test_aging_wip_skips_discarded_issues():
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
         discarded=True,
     )
-    df = AgingWipCalculator(StubRepo([*_open_issues(1), discarded])).calculate(
+    started = _open_issues(1, started_at=datetime(2024, 1, 2, tzinfo=UTC))
+    df = AgingWipCalculator(StubRepo([*started, discarded])).calculate(
         now=datetime(2024, 1, 10, tzinfo=UTC),
     )
     assert list(df["key"]) == ["O-0"]
+
+
+def _finished_after(days: int) -> Issue:
+    start = datetime(2024, 1, 1, tzinfo=UTC)
+    return Issue(
+        key="LONG",
+        status="Done",
+        created_at=start,
+        started_at=start,
+        last_finish_status_at=start + timedelta(days=days),
+        statuses_x_periods={"In Progress": timedelta(days=days)},
+    )
+
+
+def test_time_metrics_keep_the_tail_of_the_distribution():
+    repo = StubRepo([_finished_after(59), _finished_after(30)])
+    assert CycleTimeCalculator(repo).calculate() == [59, 30]
+    assert LeadTimeCalculator(repo).calculate() == [59, 30]
+    assert QueueTimeCalculator(repo).calculate() == {"In Progress": [59, 30]}

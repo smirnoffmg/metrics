@@ -13,7 +13,6 @@ import pandas as pd
 
 from metrics.consts import (
     ACTIVE_STATUSES,
-    CALC_LIMIT,
     ONE_DAY,
     ONE_HOUR,
     TESTING_STATUSES,
@@ -47,71 +46,40 @@ class TimeMetricCalculator(MetricCalculator):
         self,
         metric_name: str,
         timeslot: int,
-        limit: int,
     ) -> list[float]:
         res = []
         for issue in self.repo.all():
             metric_value = getattr(issue, metric_name)
             if metric_value:
-                time_in_days = max(
-                    1,
-                    metric_value.total_seconds() // timeslot,
-                )
-                time_in_days = min(time_in_days, limit)
-                res.append(time_in_days)
+                res.append(max(1, metric_value.total_seconds() // timeslot))
         return res
 
 
 class CycleTimeCalculator(TimeMetricCalculator):
     """Calculate cycle time for issues."""
 
-    def calculate(
-        self,
-        timeslot: int = ONE_DAY,
-        limit: int = CALC_LIMIT,
-    ) -> list[float]:
+    def calculate(self, timeslot: int = ONE_DAY) -> list[float]:
         """Calculate cycle time in the given timeslot units."""
-        return self._calculate_time_metric(
-            "cycle_time",
-            timeslot,
-            limit,
-        )
+        return self._calculate_time_metric("cycle_time", timeslot)
 
 
 class LeadTimeCalculator(TimeMetricCalculator):
     """Calculate lead time for issues."""
 
-    def calculate(
-        self,
-        timeslot: int = ONE_DAY,
-        limit: int = CALC_LIMIT,
-    ) -> list[float]:
+    def calculate(self, timeslot: int = ONE_DAY) -> list[float]:
         """Calculate lead time in the given timeslot units."""
-        return self._calculate_time_metric(
-            "lead_time",
-            timeslot,
-            limit,
-        )
+        return self._calculate_time_metric("lead_time", timeslot)
 
 
 class QueueTimeCalculator(MetricCalculator):
     """Calculate time spent in each status."""
 
-    def calculate(
-        self,
-        timeslot: int = ONE_DAY,
-        limit: int = CALC_LIMIT,
-    ) -> dict[str, list[float]]:
+    def calculate(self, timeslot: int = ONE_DAY) -> dict[str, list[float]]:
         """Calculate queue time per status in the given timeslot units."""
         tmp: dict[str, list[float]] = defaultdict(list)
         for issue in self.repo.all():
             for status, td in issue.statuses_x_periods.items():
-                period_in_status = max(
-                    1,
-                    td.total_seconds() // timeslot,
-                )
-                period_in_status = min(period_in_status, limit)
-                tmp[status].append(period_in_status)
+                tmp[status].append(max(1, td.total_seconds() // timeslot))
         return dict(tmp)
 
 
@@ -230,7 +198,7 @@ class MonteCarloForecastCalculator(MetricCalculator):
 
 
 class AgingWipCalculator(MetricCalculator):
-    """Age of open issues in their current status vs historical p85."""
+    """Age of started, unfinished issues in their current status vs historical p85."""
 
     def calculate(self, now: datetime | None = None) -> pd.DataFrame:
         """Return key/status/age_days/p85_days per open issue."""
@@ -241,7 +209,7 @@ class AgingWipCalculator(MetricCalculator):
             if issue.was_done:
                 for status, td in issue.statuses_x_periods.items():
                     history[status].append(td.total_seconds() / ONE_DAY)
-            if not issue.is_open:
+            if not issue.is_open or issue.started_at is None:
                 continue
             since = (
                 issue.status_transitions[-1].at
@@ -336,7 +304,7 @@ class AssigneeLoadCalculator(MetricCalculator):
 
 
 class FlowEfficiencyCalculator(MetricCalculator):
-    """Share of done issues' status time spent in active (working) statuses."""
+    """Share of done issues' cycle time spent in active (working) statuses."""
 
     def __init__(
         self,
@@ -350,17 +318,18 @@ class FlowEfficiencyCalculator(MetricCalculator):
         ]
 
     def calculate(self) -> float:
-        """Return active time / total status time over done issues (0.0-1.0)."""
+        """Return active time / cycle time over done issues (0.0-1.0)."""
         active = 0.0
         total = 0.0
         for issue in self.repo.all():
-            if not issue.was_done:
+            if issue.cycle_time is None:
                 continue
-            for status, period in issue.statuses_x_periods.items():
-                seconds = period.total_seconds()
-                total += seconds
-                if status.lower() in self.active_statuses:
-                    active += seconds
+            total += issue.cycle_time.total_seconds()
+            active += sum(
+                period.total_seconds()
+                for status, period in issue.statuses_x_periods.items()
+                if status.lower() in self.active_statuses
+            )
         return active / total if total else 0.0
 
 

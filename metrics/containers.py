@@ -62,6 +62,7 @@ class Container(containers.DeclarativeContainer):
         done_statuses=config.jira.done_statuses,
         discarded_statuses=config.jira.discarded_statuses,
         backlog_statuses=config.jira.backlog_statuses,
+        discarded_resolutions=config.jira.discarded_resolutions,
     )
 
     repo = providers.Singleton(

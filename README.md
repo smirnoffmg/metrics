@@ -49,7 +49,7 @@ Every chart below comes from real public projects - the [Hibernate ORM](https://
 
 ![Cumulative flow diagram](docs/images/cumulative_flow.png)
 
-**Aging work-in-progress.** Open Kafka issues by how long they've sat in their current status - anything above the dashed line has been waiting longer than 85% of past work ever did.
+**Aging work-in-progress.** Started, unfinished Kafka issues by how long they've sat in their current status - anything above the dashed line has been waiting longer than 85% of past work ever did.
 
 ![Aging work-in-progress](docs/images/aging_wip.png)
 
@@ -97,10 +97,10 @@ Then open `output/report.html`.
 - **Jira Server / Data Center:** just a personal access token, no email needed.
 - **Public instance?** `--anonymous` needs no credentials at all and figures out Cloud vs Server by itself.
 - **Your workflow ends differently?** Tell it what "finished" means, e.g. `--done-statuses "Resolved, Shipped"` (default: done, completed, closed, resolved).
-- **Dropped work isn't delivery.** Statuses like `--discarded-statuses "Rejected, Duplicate"` (default: cancelled, canceled, won't do) count neither as throughput nor as open backlog.
+- **Dropped work isn't delivery.** Statuses like `--discarded-statuses "Rejected, Duplicate"` (default: cancelled, canceled, won't do) count neither as throughput nor as open backlog. The same goes for issues closed with a resolution like Won't Fix or Duplicate - set your own with `--discarded-resolutions "Won't Fix, Out of scope"`.
 - **Cycle time starts at commitment, not at triage.** It runs from the moment an issue first leaves the backlog; name your pre-work statuses with `--backlog-statuses "Open, Ready"` (default: open, new, backlog, to do, reopened). Issues closed straight from the backlog have a lead time but no cycle time.
 - **QA has its own name?** Same for the rework metric, e.g. `--testing-statuses "In review, QA"` (default: testing).
-- **Curious how much time is real work vs waiting?** Tell it where work happens, e.g. `--active-statuses "In Progress, In Development"` (default: in progress) - that powers the flow-efficiency number in the report.
+- **Curious how much time is real work vs waiting?** Tell it where work happens, e.g. `--active-statuses "In Progress, In Development"` (default: in progress) - that powers the flow-efficiency number in the report: the share of cycle time spent in those statuses, so backlog waiting before work starts doesn't count.
 - Prefer environment variables or a config file? `uv run python -m metrics --help` shows every option.
 
 Tip: let your JQL include both finished and still-open issues - the forecast and aging charts need the open ones.

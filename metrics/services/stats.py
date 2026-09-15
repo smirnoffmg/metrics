@@ -91,7 +91,7 @@ def build_headline_tiles(
     return [
         _cycle_tile(scatter),
         _forecast_tile(forecast),
-        Tile("Open issues", str(len(aging))),
+        Tile("Work in progress", str(len(aging))),
         _throughput_tile(throughput),
         Tile("Flow efficiency", f"{flow_efficiency:.0%}"),
     ]
@@ -102,7 +102,7 @@ def build_stuck_rows(
     server_url: str,
     limit: int = 10,
 ) -> list[StuckRow]:
-    """Top open issues by age in current status, linked to Jira."""
+    """Top in-progress issues by age in current status, linked to Jira."""
     if aging.empty:
         return []
     base = server_url.rstrip("/")

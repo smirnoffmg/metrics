@@ -260,13 +260,17 @@ def test_converter_records_status_transitions_and_handoffs():
     assert issue.handoffs == expected_handoffs
 
 
-def _issue_moving_through(*steps: tuple[str, str, str]) -> dict:
+def _issue_moving_through(
+    *steps: tuple[str, str, str],
+    resolution: str | None = None,
+) -> dict:
     """Build a raw issue created 2024-01-01 from (date, from, to) status steps."""
     return {
         "key": "FLOW-1",
         "fields": {
             "created": "2024-01-01T00:00:00.000+0000",
             "status": {"name": steps[-1][2] if steps else "Open"},
+            "resolution": {"name": resolution} if resolution else None,
         },
         "changelog": {
             "histories": [
@@ -376,3 +380,39 @@ def test_converter_accepts_custom_backlog_statuses():
     assert issue.started_at == datetime(2024, 1, 4, tzinfo=UTC)
     default = JiraDataConverter().convert_data_to_issue(data_item)
     assert default.started_at == datetime(2024, 1, 2, tzinfo=UTC)
+
+
+def test_converter_closed_as_wont_fix_is_discarded_not_done():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "In Progress"),
+            ("2024-01-05", "In Progress", "Closed"),
+            resolution="Won't Fix",
+        ),
+    )
+    assert issue.discarded
+    assert not issue.was_done
+    assert not issue.is_open
+    assert issue.cycle_time is None
+
+
+def test_converter_closed_as_fixed_stays_done():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "In Progress"),
+            ("2024-01-05", "In Progress", "Closed"),
+            resolution="Fixed",
+        ),
+    )
+    assert issue.was_done
+    assert not issue.discarded
+
+
+def test_converter_accepts_custom_discarded_resolutions():
+    data_item = _issue_moving_through(
+        ("2024-01-05", "Open", "Done"),
+        resolution="Out of scope",
+    )
+    converter = JiraDataConverter(discarded_resolutions=["out of scope"])
+    assert converter.convert_data_to_issue(data_item).discarded
+    assert JiraDataConverter().convert_data_to_issue(data_item).was_done

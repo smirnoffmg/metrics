@@ -101,7 +101,7 @@ class MetricsService(BaseService):
         return self.monte_carlo_forecast_calculator.calculate()
 
     def get_aging_wip(self) -> pd.DataFrame:
-        """Calculate age of open issues in their current status."""
+        """Calculate age of started, unfinished issues in their current status."""
         self.logger.debug("Calculating aging WIP...")
         return self.aging_wip_calculator.calculate()
 

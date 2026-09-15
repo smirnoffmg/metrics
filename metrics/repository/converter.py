@@ -8,7 +8,12 @@ from typing import Any
 
 from dateutil.parser import parse
 
-from metrics.consts import BACKLOG_STATUSES, DISCARDED_STATUSES, DONE_STATUSES
+from metrics.consts import (
+    BACKLOG_STATUSES,
+    DISCARDED_RESOLUTIONS,
+    DISCARDED_STATUSES,
+    DONE_STATUSES,
+)
 from metrics.entity import Issue
 from metrics.entity.issues import StatusTransition
 
@@ -21,11 +26,15 @@ class JiraDataConverter:
         done_statuses: list[str] | None = None,
         discarded_statuses: list[str] | None = None,
         backlog_statuses: list[str] | None = None,
+        discarded_resolutions: list[str] | None = None,
     ) -> None:
         """Initialize with the statuses that mean finished, dropped, or not started."""
         self.done_statuses = _lowered(done_statuses or DONE_STATUSES)
         self.discarded_statuses = _lowered(discarded_statuses or DISCARDED_STATUSES)
         self.backlog_statuses = _lowered(backlog_statuses or BACKLOG_STATUSES)
+        self.discarded_resolutions = _lowered(
+            discarded_resolutions or DISCARDED_RESOLUTIONS,
+        )
 
     def convert_data_to_issue(self, data_item: dict) -> Issue:
         """Convert a raw Jira data dict into an Issue entity."""
@@ -36,6 +45,7 @@ class JiraDataConverter:
             changelog,
         )
         self._credit_trailing_period(data_item, changelog_data)
+        self._discard_by_resolution(data_item, changelog_data)
         return Issue(
             key=data_item["key"],
             status=data_item["fields"]["status"]["name"],
@@ -104,6 +114,19 @@ class JiraDataConverter:
         )
         if end > data["last_assignee_changed_at"]:
             data["doers_x_periods"][assignee] += end - data["last_assignee_changed_at"]
+
+    def _discard_by_resolution(self, data_item: dict, data: dict[str, Any]) -> None:
+        """Treat a finished issue resolved as Won't Fix, Duplicate etc. as dropped.
+
+        Many workflows close every issue through the same done status and record
+        the outcome only in the resolution field.
+        """
+        resolution = (data_item["fields"].get("resolution") or {}).get("name")
+        if not data["last_finish_status_at"] or not resolution:
+            return
+        if resolution.lower() in self.discarded_resolutions:
+            data["last_finish_status_at"] = None
+            data["discarded"] = True
 
     def _parse_assignee_changes(
         self,

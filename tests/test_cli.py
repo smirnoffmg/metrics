@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from metrics.__main__ import cli, parse_bool, parse_status_list, validate_config
 from metrics.consts import (
     BACKLOG_STATUSES,
+    DISCARDED_RESOLUTIONS,
     DISCARDED_STATUSES,
     DONE_STATUSES,
     TESTING_STATUSES,
@@ -71,3 +72,16 @@ def test_parse_status_list_defaults_for_discarded_and_backlog():
     assert "cancelled" not in DONE_STATUSES
     assert "cancelled" in DISCARDED_STATUSES
     assert "backlog" in BACKLOG_STATUSES
+
+
+def test_default_discarded_resolutions_cover_jira_defaults():
+    assert parse_status_list(None, DISCARDED_RESOLUTIONS) == DISCARDED_RESOLUTIONS
+    for resolution in ("won't do", "duplicate", "cannot reproduce"):
+        assert resolution in DISCARDED_RESOLUTIONS
+    assert "done" not in DISCARDED_RESOLUTIONS
+    assert "fixed" not in DISCARDED_RESOLUTIONS
+
+
+def test_cli_accepts_discarded_resolutions():
+    result = CliRunner().invoke(cli, ["--help"])
+    assert "--discarded-resolutions" in result.output

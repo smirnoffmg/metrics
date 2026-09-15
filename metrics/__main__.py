@@ -18,6 +18,7 @@ from dependency_injector.wiring import Provide, inject
 from metrics.consts import (
     ACTIVE_STATUSES,
     BACKLOG_STATUSES,
+    DISCARDED_RESOLUTIONS,
     DISCARDED_STATUSES,
     DONE_STATUSES,
     TESTING_STATUSES,
@@ -98,6 +99,7 @@ def get_env_config() -> dict[str, str | None]:
         "email": os.environ.get("JIRA_EMAIL"),
         "done_statuses": os.environ.get("JIRA_DONE_STATUSES"),
         "discarded_statuses": os.environ.get("JIRA_DISCARDED_STATUSES"),
+        "discarded_resolutions": os.environ.get("JIRA_DISCARDED_RESOLUTIONS"),
         "backlog_statuses": os.environ.get("JIRA_BACKLOG_STATUSES"),
         "testing_statuses": os.environ.get("JIRA_TESTING_STATUSES"),
         "active_statuses": os.environ.get("JIRA_ACTIVE_STATUSES"),
@@ -190,6 +192,13 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     f" (default: {','.join(DISCARDED_STATUSES)}).",
 )
 @click.option(
+    "--discarded-resolutions",
+    envvar="JIRA_DISCARDED_RESOLUTIONS",
+    help="Comma-separated resolutions that mean an issue in a done status was"
+    " dropped, not delivered"
+    f" (default: {','.join(DISCARDED_RESOLUTIONS)}).",
+)
+@click.option(
     "--backlog-statuses",
     envvar="JIRA_BACKLOG_STATUSES",
     help="Comma-separated statuses before work is committed to; cycle time starts"
@@ -222,6 +231,7 @@ def cli(  # noqa: PLR0913
     jira_email: str | None,
     done_statuses: str | None,
     discarded_statuses: str | None,
+    discarded_resolutions: str | None,
     backlog_statuses: str | None,
     testing_statuses: str | None,
     active_statuses: str | None,
@@ -236,6 +246,7 @@ def cli(  # noqa: PLR0913
         "email": None,
         "done_statuses": None,
         "discarded_statuses": None,
+        "discarded_resolutions": None,
         "backlog_statuses": None,
         "testing_statuses": None,
         "active_statuses": None,
@@ -252,6 +263,7 @@ def cli(  # noqa: PLR0913
                 "email": jira_section.get("email"),
                 "done_statuses": jira_section.get("done_statuses"),
                 "discarded_statuses": jira_section.get("discarded_statuses"),
+                "discarded_resolutions": jira_section.get("discarded_resolutions"),
                 "backlog_statuses": jira_section.get("backlog_statuses"),
                 "testing_statuses": jira_section.get("testing_statuses"),
                 "active_statuses": jira_section.get("active_statuses"),
@@ -268,6 +280,7 @@ def cli(  # noqa: PLR0913
         "email": jira_email,
         "done_statuses": done_statuses,
         "discarded_statuses": discarded_statuses,
+        "discarded_resolutions": discarded_resolutions,
         "backlog_statuses": backlog_statuses,
         "testing_statuses": testing_statuses,
         "active_statuses": active_statuses,
@@ -299,6 +312,10 @@ def cli(  # noqa: PLR0913
                     "discarded_statuses": parse_status_list(
                         cfg.get("discarded_statuses"),
                         DISCARDED_STATUSES,
+                    ),
+                    "discarded_resolutions": parse_status_list(
+                        cfg.get("discarded_resolutions"),
+                        DISCARDED_RESOLUTIONS,
                     ),
                     "backlog_statuses": parse_status_list(
                         cfg.get("backlog_statuses"),
@@ -446,7 +463,7 @@ def _render_flow_pngs(  # noqa: PLR0913
     )
     vis_service.vis_cfd(str(output_dir / "cumulative_flow.png"), cfd)
     if aging.empty:
-        logger.info("Skipping aging WIP chart: no open issues")
+        logger.info("Skipping aging WIP chart: no started, unfinished issues")
     else:
         vis_service.vis_aging_wip(str(output_dir / "aging_wip.png"), aging)
     if forecast:

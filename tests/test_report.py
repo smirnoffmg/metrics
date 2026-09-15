@@ -25,7 +25,7 @@ def test_report_renders_tiles_fragments_stuck_and_images(tmp_path):
         str(out),
         tiles=[
             Tile("Cycle time p50", "4.0d", "↓ 6.0d", delta_good=True),
-            Tile("Open issues", "3", None, delta_good=None),
+            Tile("Work in progress", "3", None, delta_good=None),
         ],
         images=charts,
         fragments=["<div class='plotly-graph-div'>FAKE_PLOTLY</div>"],
