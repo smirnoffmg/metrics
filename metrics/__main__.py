@@ -13,6 +13,8 @@ import click
 from dependency_injector import providers
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import pandas as pd
 
     from metrics.entity import Issue
@@ -48,7 +50,11 @@ from metrics.services.calculator import (
     returns_to_testing,
     weekly_throughput,
 )
-from metrics.services.stats import build_headline_tiles, build_stuck_rows
+from metrics.services.stats import (
+    build_headline_tiles,
+    build_stuck_rows,
+    scope_forecast_tile,
+)
 
 try:
     import yaml
@@ -125,14 +131,26 @@ def get_env_config() -> dict[str, str | None]:
         "testing_statuses": os.environ.get("JIRA_TESTING_STATUSES"),
         "active_statuses": os.environ.get("JIRA_ACTIVE_STATUSES"),
         "anonymous": os.environ.get("JIRA_ANONYMOUS"),
+        "forecast_jql": os.environ.get("JIRA_FORECAST_JQL"),
+        "forecast_focus": os.environ.get("JIRA_FORECAST_FOCUS"),
     }
+
+
+def _focus_errors(focus: object) -> list[str]:
+    if focus is None:
+        return []
+    try:
+        in_range = 0 < float(str(focus)) <= 1
+    except ValueError:
+        in_range = False
+    return [] if in_range else ["Forecast focus must be a number above 0 and up to 1."]
 
 
 def validate_config(cfg: dict[str, Any]) -> list[str]:
     """Validate required Jira configuration fields."""
+    errors = _focus_errors(cfg.get("forecast_focus"))
     if cfg.get("from_raw"):
-        return []
-    errors = []
+        return errors
     server = cfg.get("server")
     anonymous = parse_bool(cfg.get("anonymous"))
     if not server:
@@ -242,6 +260,18 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     f" flow-efficiency metric (default: {','.join(ACTIVE_STATUSES)}).",
 )
 @click.option(
+    "--forecast-jql",
+    envvar="JIRA_FORECAST_JQL",
+    help="JQL naming the issues to forecast, such as an epic or a release"
+    " (e.g. 'fixVersion = 7.2'); forecast at the pace of the main query's issues.",
+)
+@click.option(
+    "--forecast-focus",
+    envvar="JIRA_FORECAST_FOCUS",
+    help="Share of the team's throughput spent on the forecast issues, above 0"
+    " and up to 1 (default: 1, the team works on nothing else).",
+)
+@click.option(
     "--save-raw",
     type=click.Path(dir_okay=False),
     help="Also save the issues fetched from Jira to this JSON file.",
@@ -271,6 +301,8 @@ def cli(  # noqa: PLR0913
     backlog_statuses: str | None,
     testing_statuses: str | None,
     active_statuses: str | None,
+    forecast_jql: str | None,
+    forecast_focus: str | None,
     save_raw: str | None,
     from_raw: str | None,
     anonymous: bool,  # noqa: FBT001 - click flag
@@ -289,6 +321,8 @@ def cli(  # noqa: PLR0913
         "testing_statuses": None,
         "active_statuses": None,
         "anonymous": None,
+        "forecast_jql": None,
+        "forecast_focus": None,
     }
     if config:
         try:
@@ -306,6 +340,8 @@ def cli(  # noqa: PLR0913
                 "testing_statuses": jira_section.get("testing_statuses"),
                 "active_statuses": jira_section.get("active_statuses"),
                 "anonymous": jira_section.get("anonymous"),
+                "forecast_jql": jira_section.get("forecast_jql"),
+                "forecast_focus": jira_section.get("forecast_focus"),
             }
         except (FileNotFoundError, ImportError, ValueError) as e:
             click.echo(f"Error loading config file: {e}", err=True)
@@ -324,6 +360,8 @@ def cli(  # noqa: PLR0913
         "active_statuses": active_statuses,
         "anonymous": anonymous or None,
         "from_raw": from_raw,
+        "forecast_jql": forecast_jql,
+        "forecast_focus": forecast_focus,
     }
     cfg = merge_config(file_cfg, env_cfg, cli_cfg)
     is_anonymous = parse_bool(cfg.get("anonymous"))
@@ -334,6 +372,15 @@ def cli(  # noqa: PLR0913
         sys.exit(1)
     try:
         snapshot = load_snapshot(from_raw) if from_raw else None
+        wanted_scope = cfg.get("forecast_jql")
+        if snapshot and wanted_scope and wanted_scope != snapshot.forecast_jql:
+            saved = snapshot.forecast_jql or "no forecast query"
+            click.echo(
+                f"Error: {from_raw} was saved with {saved}, not '{wanted_scope}';"
+                " fetch again with --forecast-jql and --save-raw.",
+                err=True,
+            )
+            sys.exit(1)
         container = Container()
         container.config.from_dict(
             {
@@ -342,6 +389,10 @@ def cli(  # noqa: PLR0913
                     "token": cfg["token"],
                     "jql": snapshot.jql if snapshot else cfg["jql"],
                     "save_raw": save_raw,
+                    "forecast_jql": snapshot.forecast_jql
+                    if snapshot
+                    else cfg.get("forecast_jql") or "",
+                    "forecast_focus": float(cfg.get("forecast_focus") or 1),
                     "email": cfg.get("email"),
                     "anonymous": is_anonymous,
                     # None = auto-detect from serverInfo (anonymous mode)
@@ -397,6 +448,7 @@ def calculate_metrics(  # noqa: PLR0913
     server_url: str = Provide[Container.config.jira.server],
     active_statuses: list[str] = Provide[Container.config.jira.active_statuses],
     testing_statuses: list[str] = Provide[Container.config.jira.testing_statuses],
+    forecast_focus: float = Provide[Container.config.jira.forecast_focus],
 ) -> None:
     """Calculate all metrics, save charts, and write the HTML report."""
     output_dir = Path("output")
@@ -431,12 +483,39 @@ def calculate_metrics(  # noqa: PLR0913
     if forecast:
         fragments.append(interactive_service.forecast_fragment(forecast))
 
+    scope_tile = None
+    if repo.snapshot.forecast_jql:
+        scope = repo.forecast_issues()
+        scope_forecast, title = _forecast_scope(
+            repo.snapshot.forecast_jql,
+            scope,
+            throughput,
+            now,
+            forecast_focus,
+        )
+        scope_tile = scope_forecast_tile(
+            scope_forecast,
+            sum(1 for issue in scope if issue.is_open),
+        )
+        click.echo(title.replace("\n", ": "))
+        if scope_forecast:
+            vis_service.vis_forecast(
+                str(output_dir / "forecast_scope.png"),
+                scope_forecast,
+                title=title,
+            )
+            fragments.insert(
+                0,
+                interactive_service.forecast_fragment(scope_forecast, title=title),
+            )
+
     tiles = build_headline_tiles(
         scatter,
         aging,
         forecast,
         throughput,
         flow_efficiency(issues, active_statuses),
+        scope_tile,
     )
     report_path = output_dir / "report.html"
     report_service.render(
@@ -447,6 +526,28 @@ def calculate_metrics(  # noqa: PLR0913
         stuck_rows=build_stuck_rows(aging, server_url),
     )
     click.echo(f"Report: {report_path}")
+
+
+def _forecast_scope(
+    jql: str,
+    scope: list[Issue],
+    throughput: dict[str, int],
+    now: datetime,
+    focus: float,
+) -> tuple[dict[str, Any], str]:
+    """Forecast the issues a forecast query named, with a one-line summary."""
+    result = monte_carlo_forecast(scope, throughput, now=now, focus=focus)
+    open_count = sum(1 for issue in scope if issue.is_open)
+    # the query on its own line: a chart title cannot fit a long one beside the rest
+    summary = f"{jql}\n{open_count} of {len(scope)} issues open"
+    if result:
+        summary += (
+            f"; 85% chance done by {result['p85_date']:%d %b %Y}"
+            f" at {focus:.0%} of throughput"
+        )
+    elif open_count:
+        summary += "; not enough throughput history to forecast"
+    return result, summary
 
 
 def _render_static_charts(  # noqa: PLR0913

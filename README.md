@@ -101,6 +101,7 @@ Then open `output/report.html`.
 - **Cycle time starts at commitment, not at triage.** It runs from the moment an issue first leaves the backlog; by default, when it first leaves Jira's To Do category; name your pre-work statuses yourself with `--backlog-statuses "Open, Ready"`. Issues closed straight from the backlog have a lead time but no cycle time.
 - **QA has its own name?** Same for the rework metric, e.g. `--testing-statuses "In review, QA"` (default: testing).
 - **Curious how much time is real work vs waiting?** Tell it where work happens, e.g. `--active-statuses "In Progress, In Development"` (default: in progress) - that powers the flow-efficiency number in the report: the share of cycle time spent in those statuses, so backlog waiting before work starts doesn't count.
+- **When will this release or epic be done?** Name its issues with `--forecast-jql 'fixVersion = "9.0"'` and get its own forecast next to the backlog's, at the pace of your main query's issues. If the team spends only part of its time on it, say so: `--forecast-focus 0.5` forecasts at half the throughput.
 - **Iterating on settings?** Fetch once with `--save-raw issues.json`, then rebuild the report as often as you like with `--from-raw issues.json` - no network, seconds instead of minutes, and the same numbers every time, since time-based metrics are computed as of the fetch.
 - Prefer environment variables or a config file? `uv run python -m metrics --help` shows every option.
 

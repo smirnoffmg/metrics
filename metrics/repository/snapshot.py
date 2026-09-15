@@ -21,6 +21,9 @@ class Snapshot:
     issues: list[dict]
     # status id -> Jira status category key (new, indeterminate, done)
     statuses: dict[str, str] = field(default_factory=dict)
+    # a second query naming the issues to forecast, such as an epic or release
+    forecast_jql: str = ""
+    forecast_issues: list[dict] = field(default_factory=list)
 
 
 def save_snapshot(snapshot: Snapshot, path: str | Path) -> None:
@@ -32,6 +35,8 @@ def save_snapshot(snapshot: Snapshot, path: str | Path) -> None:
         "fetched_at": snapshot.fetched_at.isoformat(),
         "issues": snapshot.issues,
         "statuses": snapshot.statuses,
+        "forecast_jql": snapshot.forecast_jql,
+        "forecast_issues": snapshot.forecast_issues,
     }
     Path(path).write_text(json.dumps(payload))
 
@@ -49,6 +54,8 @@ def load_snapshot(path: str | Path) -> Snapshot:
         fetched_at=datetime.fromisoformat(payload["fetched_at"]),
         issues=payload["issues"],
         statuses=payload.get("statuses", {}),
+        forecast_jql=payload.get("forecast_jql", ""),
+        forecast_issues=payload.get("forecast_issues", []),
     )
 
 

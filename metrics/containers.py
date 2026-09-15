@@ -41,6 +41,7 @@ class Container(containers.DeclarativeContainer):
         jira,
         config.jira.jql,
         server=config.jira.server,
+        forecast_jql=config.jira.forecast_jql,
         cloud=config.jira.cloud,
     )
     jira_data_converter = providers.Factory(

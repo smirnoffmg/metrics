@@ -18,6 +18,8 @@ def _snapshot() -> Snapshot:
         fetched_at=datetime(2026, 9, 15, 12, 30, tzinfo=UTC),
         issues=[make_raw_issue("X-1"), make_raw_issue("X-2")],
         statuses={"1": "new", "3": "indeterminate", "6": "done"},
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=[make_raw_issue("X-2")],
     )
 
 
@@ -47,4 +49,7 @@ def test_load_snapshot_saved_before_status_categories(tmp_path):
             },
         ),
     )
-    assert load_snapshot(path).statuses == {}
+    snapshot = load_snapshot(path)
+    assert snapshot.statuses == {}
+    assert snapshot.forecast_jql == ""
+    assert snapshot.forecast_issues == []

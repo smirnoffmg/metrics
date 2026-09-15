@@ -316,7 +316,12 @@ class VisService(BaseService):
         ax.set_title("Cycle Time per Issue")
         self._save_figure(fig, filename)
 
-    def vis_forecast(self, filename: str, result: dict[str, Any]) -> None:
+    def vis_forecast(
+        self,
+        filename: str,
+        result: dict[str, Any],
+        title: str | None = None,
+    ) -> None:
         """Render the Monte Carlo weeks-to-complete histogram."""
         fig, ax = plt.subplots()
         weeks = result["weeks"]
@@ -336,9 +341,10 @@ class VisService(BaseService):
             ],
             vertical=True,
         )
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         ax.set_xlabel("weeks to complete backlog")
         ax.set_ylabel("simulations")
-        ax.set_title(f"Monte Carlo Forecast ({result['backlog']} open issues)")
+        ax.set_title(title or f"Monte Carlo Forecast ({result['backlog']} open issues)")
         self._save_figure(fig, filename)
 
     def vis_aging_wip(self, filename: str, df: pd.DataFrame) -> None:

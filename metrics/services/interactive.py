@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -108,6 +109,7 @@ class InteractiveVisService(BaseService):
         result: dict[str, Any],
         *,
         include_js: bool = False,
+        title: str | None = None,
     ) -> str:
         """Monte Carlo histogram with dated percentile lines."""
         fig = go.Figure(
@@ -126,7 +128,10 @@ class InteractiveVisService(BaseService):
                 annotation_font_color=INK_SECONDARY,
             )
         fig.update_layout(
-            title=f"Monte Carlo Forecast ({result['backlog']} open issues)",
+            # plotly renders HTML tags in titles, and JQL is full of < and >
+            title=html.escape(title).replace("\n", "<br>")
+            if title
+            else f"Monte Carlo Forecast ({result['backlog']} open issues)",
             xaxis_title="weeks to complete backlog",
             yaxis_title="simulations",
             showlegend=False,

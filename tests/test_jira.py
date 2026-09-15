@@ -94,3 +94,39 @@ def test_repository_learns_categories_of_statuses_the_status_list_missed():
     )
     repo = JiraIssuesRepository(source, JiraDataConverter())
     assert repo.all()[0].was_done
+
+
+def test_snapshot_carries_the_issues_to_forecast():
+    fake = FakeJira(
+        [make_raw_issue("X-1"), make_raw_issue("X-2")],
+        by_jql={"fixVersion = 7.2": [make_raw_issue("X-2")]},
+    )
+    snapshot = JiraAPIRepository(
+        fake,
+        "project = X",
+        forecast_jql="fixVersion = 7.2",
+        cloud=False,
+    ).get_snapshot()
+    assert snapshot.forecast_jql == "fixVersion = 7.2"
+    assert [item["key"] for item in snapshot.forecast_issues] == ["X-2"]
+
+
+def test_snapshot_without_a_forecast_query_fetches_nothing_more():
+    fake = FakeJira([make_raw_issue("X-1")])
+    snapshot = JiraAPIRepository(fake, "project = X", cloud=False).get_snapshot()
+    assert snapshot.forecast_issues == []
+    assert len(fake.search_calls) == 2  # noqa: PLR2004 - total, then one page
+
+
+def test_repository_converts_the_issues_to_forecast():
+    source = MagicMock()
+    source.get_snapshot.return_value = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2024, 1, 5, tzinfo=UTC),
+        issues=[make_raw_issue("X-1")],
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=[make_raw_issue("X-2"), make_raw_issue("X-3")],
+    )
+    repo = JiraIssuesRepository(source, JiraDataConverter())
+    assert [issue.key for issue in repo.forecast_issues()] == ["X-2", "X-3"]

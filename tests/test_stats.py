@@ -6,7 +6,12 @@ from datetime import UTC, date, datetime
 
 import pandas as pd
 
-from metrics.services.stats import Tile, build_headline_tiles, build_stuck_rows
+from metrics.services.stats import (
+    Tile,
+    build_headline_tiles,
+    build_stuck_rows,
+    scope_forecast_tile,
+)
 
 
 def _scatter_df():
@@ -82,3 +87,36 @@ def test_build_stuck_rows_sorted_and_linked():
 def test_build_stuck_rows_empty():
     empty = pd.DataFrame({"key": [], "status": [], "age_days": [], "p85_days": []})
     assert build_stuck_rows(empty, "https://x") == []
+
+
+def test_build_headline_tiles_adds_the_scope_tile():
+    scope = scope_forecast_tile(
+        {"p85": 3.0, "p85_date": date(2024, 2, 1)}, open_count=4
+    )
+    tiles = build_headline_tiles(
+        scatter=_scatter_df(),
+        aging=_aging_df(),
+        forecast={},
+        throughput={"2024W01": 2},
+        flow_efficiency=0.0,
+        scope_tile=scope,
+    )
+    assert Tile("85% of forecast scope done", "by 01 Feb 2024") in tiles
+
+
+def test_scope_forecast_tile_says_when_nothing_is_left():
+    assert scope_forecast_tile({}, open_count=0) == Tile(
+        "85% of forecast scope done", "all done"
+    )
+    assert scope_forecast_tile({}, open_count=3).value == "n/a"
+
+
+def test_build_headline_tiles_leave_out_the_scope_tile_without_a_scope():
+    tiles = build_headline_tiles(
+        scatter=_scatter_df(),
+        aging=_aging_df(),
+        forecast={},
+        throughput={"2024W01": 2},
+        flow_efficiency=0.0,
+    )
+    assert "85% of forecast scope done" not in [tile.label for tile in tiles]

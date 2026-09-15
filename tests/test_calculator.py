@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
+import pytest
 
 from metrics.entity.issues import Issue, StatusTransition
 from metrics.services.calculator import (
@@ -187,6 +188,26 @@ def test_monte_carlo_constant_throughput_is_deterministic():
     assert result["p85_date"] == date(2026, 8, 5)
     assert result["p95_date"] == date(2026, 8, 5)
     assert len(result["weeks"]) == 200  # noqa: PLR2004
+
+
+def test_monte_carlo_forecast_scales_throughput_by_focus():
+    throughput = {f"2024W{w:02d}": 2 for w in range(1, 7)}
+    result = monte_carlo_forecast(
+        _open_issues(6),
+        throughput,
+        simulations=100,
+        seed=1,
+        now=datetime(2026, 7, 15, tzinfo=UTC),
+        focus=0.5,
+    )
+    assert result["p85"] == 6.0  # noqa: PLR2004
+    assert result["focus"] == 0.5  # noqa: PLR2004
+
+
+@pytest.mark.parametrize("focus", [0.0, -0.5, 1.5])
+def test_monte_carlo_forecast_rejects_a_focus_outside_its_range(focus):
+    with pytest.raises(ValueError, match="focus"):
+        monte_carlo_forecast(_open_issues(1), {"2024W01": 1}, focus=focus)
 
 
 def test_flow_efficiency_share_of_active_time():

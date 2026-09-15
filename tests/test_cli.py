@@ -191,3 +191,76 @@ def test_cli_classifies_statuses_by_category_unless_told_otherwise():
     assert "browse/X-50" not in by_category_report
     assert "browse/X-51" in by_category_report
     assert "browse/X-50" in by_name_report
+
+
+def _finished_and_open_issues():
+    return [
+        _raw_issue(
+            f"X-{i}",
+            "Done",
+            ("2026-06-02", "Open", "In Progress"),
+            (f"2026-{6 + i % 3:02d}-{10 + i:02d}", "In Progress", "Done"),
+            resolution="Fixed",
+        )
+        for i in range(12)
+    ] + [_raw_issue("X-99", "In Progress", ("2026-09-01", "Open", "In Progress"))]
+
+
+def test_cli_forecasts_the_scope_saved_in_a_snapshot():
+    scope = [
+        _raw_issue("X-99", "In Progress", ("2026-09-01", "Open", "In Progress")),
+        _raw_issue("X-100", "Open"),
+        _raw_issue(
+            "X-3",
+            "Done",
+            ("2026-06-02", "Open", "In Progress"),
+            ("2026-08-13", "In Progress", "Done"),
+            resolution="Fixed",
+        ),
+    ]
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=_finished_and_open_issues(),
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=scope,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(
+            cli,
+            ["--from-raw", "raw.json", "--forecast-focus", "0.5"],
+        )
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    assert "fixVersion = 7.2: 2 of 3 issues open" in result.output
+    assert "50% of throughput" in result.output
+    assert "85% of forecast scope done" in report
+    assert "fixVersion = 7.2" in report
+
+
+def test_cli_refuses_a_forecast_query_the_snapshot_was_not_saved_with():
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=_finished_and_open_issues(),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(
+            cli,
+            ["--from-raw", "raw.json", "--forecast-jql", "fixVersion = 7.2"],
+        )
+    assert result.exit_code != 0
+    assert "fixVersion = 7.2" in result.output
+
+
+def test_validate_config_rejects_a_focus_outside_its_range():
+    for focus in ("0", "1.5", "half"):
+        errors = validate_config({"from_raw": "raw.json", "forecast_focus": focus})
+        assert any("focus" in error for error in errors), focus
+    assert validate_config({"from_raw": "raw.json", "forecast_focus": "0.4"}) == []

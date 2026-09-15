@@ -55,8 +55,7 @@ def _split_halves(scatter: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return current, previous
 
 
-def _forecast_tile(forecast: dict[str, Any]) -> Tile:
-    label = "85% of backlog done"
+def _forecast_tile(forecast: dict[str, Any], label: str) -> Tile:
     if not forecast:
         return Tile(label, "n/a")
     return Tile(label, f"by {forecast['p85_date']:%d %b %Y}")
@@ -80,21 +79,33 @@ def _throughput_tile(throughput: dict[str, int]) -> Tile:
     return Tile(label, f"{value:.1f}/wk", f"{arrow} {abs(delta):.1f}", delta > 0)
 
 
-def build_headline_tiles(
+def build_headline_tiles(  # noqa: PLR0913
     scatter: pd.DataFrame,
     aging: pd.DataFrame,
     forecast: dict[str, Any],
     throughput: dict[str, int],
     flow_efficiency: float,
+    scope_tile: Tile | None = None,
 ) -> list[Tile]:
-    """Build the report hero row from the calculated metrics."""
-    return [
+    """Build the report hero row; scope_tile is None without a forecast query."""
+    tiles = [
         _cycle_tile(scatter),
-        _forecast_tile(forecast),
+        _forecast_tile(forecast, "85% of backlog done"),
         Tile("Work in progress", str(len(aging))),
         _throughput_tile(throughput),
         Tile("Flow efficiency", f"{flow_efficiency:.0%}"),
     ]
+    if scope_tile is not None:
+        tiles.insert(2, scope_tile)
+    return tiles
+
+
+def scope_forecast_tile(forecast: dict[str, Any], open_count: int) -> Tile:
+    """Headline tile for the forecast query's issues."""
+    label = "85% of forecast scope done"
+    if open_count == 0:
+        return Tile(label, "all done")
+    return _forecast_tile(forecast, label)
 
 
 def build_stuck_rows(

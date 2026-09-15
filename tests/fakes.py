@@ -40,21 +40,24 @@ class FakeJira:
         self,
         issues: list[dict],
         statuses: list[FakeStatus] | None = None,
+        by_jql: dict[str, list[dict]] | None = None,
     ) -> None:
         self.issues = issues
         self.search_calls: list[dict[str, Any]] = []
         self._statuses = statuses or []
+        self.by_jql = by_jql or {}
 
     def statuses(self) -> list[FakeStatus]:
         return self._statuses
 
-    def search_issues(self, jql_str: str, **kwargs: Any) -> Any:  # noqa: ARG002
+    def search_issues(self, jql_str: str, **kwargs: Any) -> Any:
         self.search_calls.append(kwargs)
+        issues = self.by_jql.get(jql_str, self.issues)
         start = kwargs.get("startAt", 0)
         limit = kwargs.get("maxResults", 50)
-        page = self.issues[start : start + limit]
+        page = issues[start : start + limit]
         if kwargs.get("json_result"):
-            return {"total": len(self.issues), "issues": page}
+            return {"total": len(issues), "issues": page}
         return [_NotSubscriptable() for _ in page]
 
 
