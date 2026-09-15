@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from metrics.services.vis import VisService, biggest_drop, split_tail
+from metrics.services.vis import VisService, biggest_drop, body_ticks, split_tail
 
 
 def test_visservice_vis_df_creates_file(temp_png_file):
@@ -158,3 +158,27 @@ def test_visservice_vis_duration_histogram_creates_file(temp_png_file):
 def test_visservice_vis_duration_histogram_handles_no_data(temp_png_file):
     VisService().vis_duration_histogram(temp_png_file, [], x_label="days")
     assert Path(temp_png_file).exists()
+
+
+def test_body_ticks_leave_room_for_the_tail_label():
+    # Hibernate's cycle time: the "500" tick sat under the ">487" tail label
+    ticks = [0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0]
+    assert body_ticks(ticks, tail_x=525.5, right=575.5) == [
+        0.0,
+        100.0,
+        200.0,
+        300.0,
+        400.0,
+    ]
+
+
+def test_body_ticks_keep_ticks_well_clear_of_the_tail():
+    ticks = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0]
+    assert body_ticks(ticks, tail_x=30.5, right=34.5) == [
+        0.0,
+        5.0,
+        10.0,
+        15.0,
+        20.0,
+        25.0,
+    ]

@@ -75,6 +75,16 @@ def split_tail(
     return body, tail, cutoff
 
 
+# share of the x axis kept free of body ticks left of the tail bar's label
+TAIL_TICK_CLEARANCE = 0.08
+
+
+def body_ticks(ticks: list[float], tail_x: float, right: float) -> list[float]:
+    """Keep the body's x ticks that cannot run into the tail bar's tick label."""
+    limit = tail_x - TAIL_TICK_CLEARANCE * right
+    return [t for t in ticks if 0 <= t <= limit]
+
+
 def fold_rare_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Fold the smallest columns into "Other" to stay within 8 hues."""
     if len(df.columns) <= MAX_HUES:
@@ -491,8 +501,9 @@ class VisService(BaseService):
                     padding=3,
                     color=INK_SECONDARY,
                 )
-                ax.set_xlim(right=tail_x + width * 2)
-                ticks = [t for t in ax.get_xticks() if 0 <= t < edges[-1]]
+                right = tail_x + width * 2
+                ax.set_xlim(right=right)
+                ticks = body_ticks(list(ax.get_xticks()), tail_x, right)
                 ax.set_xticks(
                     [*ticks, tail_x],
                     labels=[f"{t:.0f}" for t in ticks] + [f">{math.floor(cutoff)}"],
