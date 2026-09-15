@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -231,3 +232,28 @@ def test_get_issues_cloud_fetches_changelogs_cut_to_the_latest_entries():
     assert by_key["LONG-1"]["changelog"]["histories"] == full
     assert by_key["SHORT-1"]["changelog"]["histories"] == full[:2]
     assert fake.changelog_calls == ["LONG-1", "LONG-1"]
+
+
+_BUSY = JIRAError("503 busy")
+
+
+class _BrokenJira:
+    deploymentType = "Server"  # noqa: N815 - mirrors the jira client attribute
+
+    def search_issues(self, *args, **kwargs):  # noqa: ARG002
+        raise _BUSY
+
+    def enhanced_search_issues(self, *args, **kwargs):  # noqa: ARG002
+        raise _BUSY
+
+
+@pytest.mark.parametrize("fetch", [get_issues, get_issues_cloud])
+def test_a_failed_fetch_is_reported_once_by_the_caller(fetch, caplog, monkeypatch):
+    # the container test's fileConfig disables loggers created before it
+    logger = logging.getLogger("metrics.repository.utils")
+    monkeypatch.setattr(logger, "disabled", False)
+    with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as err:
+        fetch(_BrokenJira(), "project=TEST")
+    assert "503 busy" in str(err.value)
+    assert str(err.value).count("Failed to fetch") == 1
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []

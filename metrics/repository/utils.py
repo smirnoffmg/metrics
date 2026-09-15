@@ -35,12 +35,8 @@ def get_issues_total(j: JIRA, jql: str) -> int:
     try:
         issues_response = j.search_issues(jql, maxResults=1, json_result=True)
     except JIRAError as err:
-        logger.exception("Failed to fetch total issues from Jira")
         msg = f"Failed to fetch total issues from Jira: {err}"
         raise RuntimeError(msg) from err
-    except Exception:
-        logger.exception("Unexpected error in get_issues_total")
-        raise
     else:
         logger.debug("Total %d issues...", issues_response["total"])
         return issues_response["total"]
@@ -84,12 +80,8 @@ def get_issues_slice(
             json_result=True,
         )
     except JIRAError as err:
-        logger.exception("Failed to fetch issues slice from Jira")
         msg = f"Failed to fetch issues slice from Jira: {err}"
         raise RuntimeError(msg) from err
-    except Exception:
-        logger.exception("Unexpected error in get_issues_slice")
-        raise
     else:
         return issues_response["issues"]
 
@@ -132,7 +124,6 @@ def get_issues_cloud(j: JIRA, jql: str) -> list[dict]:
         for issue in result:
             _complete_changelog(j, issue)
     except JIRAError as err:
-        logger.exception("Failed to fetch issues from Jira Cloud")
         msg = f"Failed to fetch issues from Jira Cloud: {err}"
         raise RuntimeError(msg) from err
     return result
@@ -179,21 +170,16 @@ def get_issues(j: JIRA, jql: str) -> list[dict]:
     """
     result: list[dict] = []
     per_page = 50
-    try:
-        issues_total = get_issues_total(j, jql)
-        offsets = [p * per_page for p in range(issues_total // per_page + 1)]
+    issues_total = get_issues_total(j, jql)
+    offsets = [p * per_page for p in range(issues_total // per_page + 1)]
 
-        with ThreadPoolExecutor(max_workers=min(8, len(offsets))) as pool:
-            for result_chunk in pool.map(
-                get_issues_slice,
-                repeat(j),
-                repeat(jql),
-                offsets,
-                repeat(per_page),
-            ):
-                result.extend(result_chunk)
-    except Exception as err:
-        logger.exception("Failed to fetch issues from Jira")
-        msg = f"Failed to fetch issues from Jira: {err}"
-        raise RuntimeError(msg) from err
+    with ThreadPoolExecutor(max_workers=min(8, len(offsets))) as pool:
+        for result_chunk in pool.map(
+            get_issues_slice,
+            repeat(j),
+            repeat(jql),
+            offsets,
+            repeat(per_page),
+        ):
+            result.extend(result_chunk)
     return result

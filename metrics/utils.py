@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from functools import cache
 
 from jira import JIRA
 from jira.exceptions import JIRAError
-
-logger = logging.getLogger(__name__)
 
 
 @cache
@@ -47,11 +44,5 @@ def get_jira_client(
             return JIRA(server=server, basic_auth=(email, token))
         return JIRA(server=server, token_auth=token)
     except JIRAError as err:
-        logger.exception(
-            "Failed to authenticate or connect to Jira",
-        )
         msg = f"Failed to authenticate or connect to Jira: {err}"
         raise RuntimeError(msg) from err
-    except Exception:
-        logger.exception("Unexpected error in get_jira_client")
-        raise
