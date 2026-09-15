@@ -20,6 +20,7 @@ def _snapshot() -> Snapshot:
         statuses={"1": "new", "3": "indeterminate", "6": "done"},
         forecast_jql="fixVersion = 7.2",
         forecast_issues=[make_raw_issue("X-2")],
+        delivery={"project": "group/app", "tags": []},
     )
 
 
@@ -53,3 +54,4 @@ def test_load_snapshot_saved_before_status_categories(tmp_path):
     assert snapshot.statuses == {}
     assert snapshot.forecast_jql == ""
     assert snapshot.forecast_issues == []
+    assert snapshot.delivery is None

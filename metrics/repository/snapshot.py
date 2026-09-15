@@ -24,6 +24,8 @@ class Snapshot:
     # a second query naming the issues to forecast, such as an epic or release
     forecast_jql: str = ""
     forecast_issues: list[dict] = field(default_factory=list)
+    # raw GitLab tags, compares and merge requests; None without a project
+    delivery: dict | None = None
 
 
 def save_snapshot(snapshot: Snapshot, path: str | Path) -> None:
@@ -37,6 +39,7 @@ def save_snapshot(snapshot: Snapshot, path: str | Path) -> None:
         "statuses": snapshot.statuses,
         "forecast_jql": snapshot.forecast_jql,
         "forecast_issues": snapshot.forecast_issues,
+        "delivery": snapshot.delivery,
     }
     Path(path).write_text(json.dumps(payload))
 
@@ -56,6 +59,7 @@ def load_snapshot(path: str | Path) -> Snapshot:
         statuses=payload.get("statuses", {}),
         forecast_jql=payload.get("forecast_jql", ""),
         forecast_issues=payload.get("forecast_issues", []),
+        delivery=payload.get("delivery"),
     )
 
 

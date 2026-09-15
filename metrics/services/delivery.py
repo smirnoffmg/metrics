@@ -57,7 +57,7 @@ def deploy_time(tag: dict, released_at: dict[str, str]) -> datetime:
 
 def ordered_tags(raw_tags: Sequence[dict], raw_releases: Sequence[dict]) -> list[dict]:
     """Tags in the order they were deployed."""
-    released_at = _released_at(raw_releases)
+    released_at = released_at_by_tag(raw_releases)
     return sorted(raw_tags, key=lambda tag: deploy_time(tag, released_at))
 
 
@@ -71,7 +71,7 @@ def deploys_from_raw(
     agents = {author.lower() for author in agent_authors}
     hotfix = {label.lower() for label in hotfix_labels}
     mr_by_sha = _merge_requests_by_sha(raw.get("merge_requests", []))
-    released_at = _released_at(raw.get("releases", []))
+    released_at = released_at_by_tag(raw.get("releases", []))
 
     deploys: list[Deploy] = []
     for tag in ordered_tags(raw["tags"], raw.get("releases", [])):
@@ -176,7 +176,8 @@ def _judged(deploys: Sequence[Deploy]) -> list[tuple[Deploy, bool]]:
     ]
 
 
-def _released_at(raw_releases: Iterable[dict]) -> dict[str, str]:
+def released_at_by_tag(raw_releases: Iterable[dict]) -> dict[str, str]:
+    """Map each tag with a dated release to when it was released."""
     return {
         release["tag_name"]: release["released_at"]
         for release in raw_releases

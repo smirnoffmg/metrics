@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 
+import pandas as pd
+
 from metrics.services.report import ReportService
 from metrics.services.stats import StuckRow, Tile
 
@@ -47,3 +49,27 @@ def test_report_renders_tiles_fragments_stuck_and_images(tmp_path):
     assert "FAKE_PLOTLY" in html
     assert 'href="https://jira.example.com/browse/B-2"' in html
     assert "12.5" in html
+
+
+def test_report_renders_the_agent_comparison(tmp_path):
+    out = tmp_path / "report.html"
+    comparison = pd.DataFrame.from_dict(
+        {
+            "agents": {
+                "changes": 3,
+                "lead_time_p50_days": 1.25,
+                "change_failure_rate": 0.5,
+            },
+            "people": {
+                "changes": 9,
+                "lead_time_p50_days": None,
+                "change_failure_rate": None,
+            },
+        },
+        orient="index",
+    )
+    ReportService().render(str(out), tiles=[], images=[], agent_comparison=comparison)
+    html = out.read_text(encoding="utf-8")
+    assert "Agents and people" in html
+    assert "<td>agents</td><td>3</td><td>1.2d</td><td>50%</td>" in html
+    assert "<td>people</td><td>9</td><td>n/a</td><td>n/a</td>" in html

@@ -8,6 +8,7 @@ from pathlib import Path
 from dependency_injector import containers, providers
 
 from metrics.repository.converter import JiraDataConverter
+from metrics.repository.gitlab import GitLabDeliverySource, SnapshotWithDelivery
 from metrics.repository.jira import JiraAPIRepository, JiraIssuesRepository
 
 from .services import (
@@ -52,9 +53,23 @@ class Container(containers.DeclarativeContainer):
         discarded_resolutions=config.jira.discarded_resolutions,
     )
 
+    gitlab_delivery = providers.Factory(
+        GitLabDeliverySource,
+        url=config.gitlab.url,
+        token=config.gitlab.token,
+        project=config.gitlab.project,
+        tag_pattern=config.gitlab.deploy_tag_pattern,
+        days=config.gitlab.delivery_days,
+    )
+    snapshot_source = providers.Factory(
+        SnapshotWithDelivery,
+        jira_api_repo,
+        gitlab_delivery,
+    )
+
     repo = providers.Singleton(
         JiraIssuesRepository,
-        api_repo=jira_api_repo,
+        api_repo=snapshot_source,
         converter=jira_data_converter,
         save_path=config.jira.save_raw,
     )

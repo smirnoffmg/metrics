@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from statistics import fmean
+from statistics import fmean, median
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -126,4 +126,29 @@ def build_stuck_rows(
             url=f"{base}/browse/{row.key}",
         )
         for row in ordered.itertuples()
+    ]
+
+
+def build_delivery_tiles(
+    weekly: dict[str, int],
+    lead_times: pd.DataFrame,
+    failure_rate: float | None,
+    recovery_days: list[float],
+) -> list[Tile]:
+    """Build DORA's four keys as headline tiles."""
+    lead = lead_times["lead_time_days"]
+    return [
+        Tile("Deploys", f"{fmean(weekly.values()):.1f}/wk" if weekly else "n/a"),
+        Tile(
+            "Change lead time p50",
+            f"{float(lead.quantile(0.5)):.1f}d" if len(lead) else "n/a",
+        ),
+        Tile(
+            "Change fail rate",
+            f"{failure_rate:.0%}" if failure_rate is not None else "n/a",
+        ),
+        Tile(
+            "Recovery time p50",
+            f"{median(recovery_days):.1f}d" if recovery_days else "no failures",
+        ),
     ]

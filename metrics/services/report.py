@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pandas as pd
+
 from .base import BaseService
 
 if TYPE_CHECKING:
@@ -47,6 +49,7 @@ footer {{ color: #898781; font-size: 0.8rem; }}
 <div class="tiles">{tiles}</div>
 {fragments}
 {stuck_table}
+{agent_table}
 {sections}
 <footer>Generated {generated_at}</footer>
 </body>
@@ -80,16 +83,40 @@ def _stuck_table_html(rows: Sequence[StuckRow]) -> str:
     )
 
 
+def _agent_table_html(comparison: pd.DataFrame | None) -> str:
+    if comparison is None:
+        return ""
+
+    def days(value: float | None) -> str:
+        return "n/a" if pd.isna(value) else f"{value:.1f}d"
+
+    def share(value: float | None) -> str:
+        return "n/a" if pd.isna(value) else f"{value:.0%}"
+
+    body = "".join(
+        f"<tr><td>{group}</td><td>{int(row['changes'])}</td>"
+        f"<td>{days(row['lead_time_p50_days'])}</td>"
+        f"<td>{share(row['change_failure_rate'])}</td></tr>"
+        for group, row in comparison.iterrows()
+    )
+    return (
+        "<section><h2>Agents and people</h2>"
+        "<table><tr><th></th><th>Changes shipped</th><th>Change lead time p50</th>"
+        f"<th>Change fail rate</th></tr>{body}</table></section>"
+    )
+
+
 class ReportService(BaseService):
     """Renders a single-file HTML report."""
 
-    def render(
+    def render(  # noqa: PLR0913
         self,
         filename: str,
         tiles: Sequence[Tile],
         images: Iterable[Path],
         fragments: Sequence[str] = (),
         stuck_rows: Sequence[StuckRow] = (),
+        agent_comparison: pd.DataFrame | None = None,
     ) -> None:
         """Write the report: tiles, interactive charts, stuck table, PNGs."""
         sections = []
@@ -104,6 +131,7 @@ class ReportService(BaseService):
             tiles="".join(_tile_html(tile) for tile in tiles),
             fragments="\n".join(f"<section>{f}</section>" for f in fragments),
             stuck_table=_stuck_table_html(stuck_rows),
+            agent_table=_agent_table_html(agent_comparison),
             sections="\n".join(sections),
             generated_at=datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC"),
         )

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +31,12 @@ from metrics.consts import (
     TESTING_STATUSES,
 )
 from metrics.containers import Container
+from metrics.repository.gitlab import (
+    DEFAULT_DELIVERY_DAYS,
+    DEFAULT_GITLAB_URL,
+    DEFAULT_HOTFIX_LABELS,
+    DEFAULT_TAG_PATTERN,
+)
 from metrics.repository.jira import JiraIssuesRepository  # noqa: TC001
 from metrics.repository.snapshot import StaticSnapshotSource, load_snapshot
 from metrics.services import (  # noqa: TC001
@@ -50,7 +58,17 @@ from metrics.services.calculator import (
     returns_to_testing,
     weekly_throughput,
 )
+from metrics.services.delivery import (
+    agent_comparison,
+    change_failure_rate,
+    change_lead_times,
+    deployment_frequency,
+    deploys_from_raw,
+    recovery_times,
+)
 from metrics.services.stats import (
+    Tile,
+    build_delivery_tiles,
     build_headline_tiles,
     build_stuck_rows,
     scope_forecast_tile,
@@ -60,6 +78,17 @@ try:
     import yaml
 except ImportError:
     yaml = None  # type: ignore[assignment]
+
+
+GITLAB_CONFIG_KEYS = (
+    "gitlab_url",
+    "gitlab_token",
+    "gitlab_project",
+    "deploy_tag_pattern",
+    "hotfix_labels",
+    "agent_authors",
+    "delivery_days",
+)
 
 
 def load_config_file(config_path: str) -> dict[str, Any]:
@@ -133,6 +162,13 @@ def get_env_config() -> dict[str, str | None]:
         "anonymous": os.environ.get("JIRA_ANONYMOUS"),
         "forecast_jql": os.environ.get("JIRA_FORECAST_JQL"),
         "forecast_focus": os.environ.get("JIRA_FORECAST_FOCUS"),
+        "gitlab_url": os.environ.get("GITLAB_URL"),
+        "gitlab_token": os.environ.get("GITLAB_TOKEN"),
+        "gitlab_project": os.environ.get("GITLAB_PROJECT"),
+        "deploy_tag_pattern": os.environ.get("GITLAB_DEPLOY_TAG_PATTERN"),
+        "hotfix_labels": os.environ.get("GITLAB_HOTFIX_LABELS"),
+        "agent_authors": os.environ.get("GITLAB_AGENT_AUTHORS"),
+        "delivery_days": os.environ.get("GITLAB_DELIVERY_DAYS"),
     }
 
 
@@ -146,9 +182,25 @@ def _focus_errors(focus: object) -> list[str]:
     return [] if in_range else ["Forecast focus must be a number above 0 and up to 1."]
 
 
+def _gitlab_errors(cfg: dict[str, Any]) -> list[str]:
+    errors = []
+    pattern = cfg.get("deploy_tag_pattern")
+    if pattern:
+        try:
+            re.compile(pattern)
+        except re.error as err:
+            errors.append(
+                f"Deploy tag pattern is not a valid regular expression: {err}"
+            )
+    days = cfg.get("delivery_days")
+    if days is not None and not (str(days).isdigit() and int(days) > 0):
+        errors.append("Delivery days must be a whole number above 0.")
+    return errors
+
+
 def validate_config(cfg: dict[str, Any]) -> list[str]:
     """Validate required Jira configuration fields."""
-    errors = _focus_errors(cfg.get("forecast_focus"))
+    errors = _focus_errors(cfg.get("forecast_focus")) + _gitlab_errors(cfg)
     if cfg.get("from_raw"):
         return errors
     server = cfg.get("server")
@@ -272,6 +324,45 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     " and up to 1 (default: 1, the team works on nothing else).",
 )
 @click.option(
+    "--gitlab-project",
+    envvar="GITLAB_PROJECT",
+    help="GitLab project path (e.g. group/app) whose release tags are its deploys;"
+    " adds DORA delivery metrics to the report.",
+)
+@click.option(
+    "--gitlab-url",
+    envvar="GITLAB_URL",
+    help=f"GitLab instance URL (default: {DEFAULT_GITLAB_URL}).",
+)
+@click.option(
+    "--gitlab-token",
+    envvar="GITLAB_TOKEN",
+    help="GitLab access token with read_api scope.",
+)
+@click.option(
+    "--deploy-tag-pattern",
+    envvar="GITLAB_DEPLOY_TAG_PATTERN",
+    help="Regular expression for tags that are deploys"
+    f" (default: {DEFAULT_TAG_PATTERN}).",
+)
+@click.option(
+    "--hotfix-labels",
+    envvar="GITLAB_HOTFIX_LABELS",
+    help="Comma-separated merge request labels marking a hotfix; branches named"
+    f" hotfix* count too (default: {','.join(DEFAULT_HOTFIX_LABELS)}).",
+)
+@click.option(
+    "--agent-authors",
+    envvar="GITLAB_AGENT_AUTHORS",
+    help="Comma-separated usernames, commit author names or emails of agents,"
+    " to compare their changes with people's.",
+)
+@click.option(
+    "--delivery-days",
+    envvar="GITLAB_DELIVERY_DAYS",
+    help=f"Days of deploys to measure (default: {DEFAULT_DELIVERY_DAYS}).",
+)
+@click.option(
     "--save-raw",
     type=click.Path(dir_okay=False),
     help="Also save the issues fetched from Jira to this JSON file.",
@@ -303,6 +394,13 @@ def cli(  # noqa: PLR0913
     active_statuses: str | None,
     forecast_jql: str | None,
     forecast_focus: str | None,
+    gitlab_project: str | None,
+    gitlab_url: str | None,
+    gitlab_token: str | None,
+    deploy_tag_pattern: str | None,
+    hotfix_labels: str | None,
+    agent_authors: str | None,
+    delivery_days: str | None,
     save_raw: str | None,
     from_raw: str | None,
     anonymous: bool,  # noqa: FBT001 - click flag
@@ -323,11 +421,13 @@ def cli(  # noqa: PLR0913
         "anonymous": None,
         "forecast_jql": None,
         "forecast_focus": None,
+        **dict.fromkeys(GITLAB_CONFIG_KEYS),
     }
     if config:
         try:
             file_data = load_config_file(config)
             jira_section = file_data.get("jira", {})
+            gitlab_section = file_data.get("gitlab", {})
             file_cfg = {
                 "server": jira_section.get("server"),
                 "token": jira_section.get("token"),
@@ -342,6 +442,10 @@ def cli(  # noqa: PLR0913
                 "anonymous": jira_section.get("anonymous"),
                 "forecast_jql": jira_section.get("forecast_jql"),
                 "forecast_focus": jira_section.get("forecast_focus"),
+                **{
+                    key: gitlab_section.get(key.removeprefix("gitlab_"))
+                    for key in GITLAB_CONFIG_KEYS
+                },
             }
         except (FileNotFoundError, ImportError, ValueError) as e:
             click.echo(f"Error loading config file: {e}", err=True)
@@ -362,6 +466,13 @@ def cli(  # noqa: PLR0913
         "from_raw": from_raw,
         "forecast_jql": forecast_jql,
         "forecast_focus": forecast_focus,
+        "gitlab_url": gitlab_url,
+        "gitlab_token": gitlab_token,
+        "gitlab_project": gitlab_project,
+        "deploy_tag_pattern": deploy_tag_pattern,
+        "hotfix_labels": hotfix_labels,
+        "agent_authors": agent_authors,
+        "delivery_days": delivery_days,
     }
     cfg = merge_config(file_cfg, env_cfg, cli_cfg)
     is_anonymous = parse_bool(cfg.get("anonymous"))
@@ -423,10 +534,25 @@ def cli(  # noqa: PLR0913
                         ACTIVE_STATUSES,
                     ),
                 },
+                "gitlab": {
+                    "url": cfg.get("gitlab_url") or DEFAULT_GITLAB_URL,
+                    "token": cfg.get("gitlab_token"),
+                    "project": cfg.get("gitlab_project") or "",
+                    "deploy_tag_pattern": cfg.get("deploy_tag_pattern")
+                    or DEFAULT_TAG_PATTERN,
+                    "hotfix_labels": parse_status_list(
+                        cfg.get("hotfix_labels"),
+                        DEFAULT_HOTFIX_LABELS,
+                    ),
+                    "agent_authors": parse_status_list(cfg.get("agent_authors"), []),
+                    "delivery_days": int(
+                        cfg.get("delivery_days") or DEFAULT_DELIVERY_DAYS,
+                    ),
+                },
             },
         )
         if snapshot:
-            container.jira_api_repo.override(
+            container.snapshot_source.override(
                 providers.Object(StaticSnapshotSource(snapshot)),
             )
         container.init_resources()
@@ -449,6 +575,8 @@ def calculate_metrics(  # noqa: PLR0913
     active_statuses: list[str] = Provide[Container.config.jira.active_statuses],
     testing_statuses: list[str] = Provide[Container.config.jira.testing_statuses],
     forecast_focus: float = Provide[Container.config.jira.forecast_focus],
+    agent_authors: list[str] = Provide[Container.config.gitlab.agent_authors],
+    hotfix_labels: list[str] = Provide[Container.config.gitlab.hotfix_labels],
 ) -> None:
     """Calculate all metrics, save charts, and write the HTML report."""
     output_dir = Path("output")
@@ -517,6 +645,19 @@ def calculate_metrics(  # noqa: PLR0913
         flow_efficiency(issues, active_statuses),
         scope_tile,
     )
+    comparison = None
+    if repo.snapshot.delivery:
+        delivery_tiles, comparison, charts = _report_delivery(
+            repo.snapshot.delivery,
+            now,
+            agent_authors,
+            hotfix_labels,
+            vis_service,
+            output_dir,
+        )
+        tiles.extend(delivery_tiles)
+        report_images.extend(charts)
+
     report_path = output_dir / "report.html"
     report_service.render(
         str(report_path),
@@ -524,8 +665,60 @@ def calculate_metrics(  # noqa: PLR0913
         images=report_images,
         fragments=fragments,
         stuck_rows=build_stuck_rows(aging, server_url),
+        agent_comparison=comparison,
     )
     click.echo(f"Report: {report_path}")
+
+
+def _report_delivery(  # noqa: PLR0913
+    delivery: dict[str, Any],
+    now: datetime,
+    agent_authors: list[str],
+    hotfix_labels: list[str],
+    vis_service: VisService,
+    output_dir: Path,
+) -> tuple[list[Tile], pd.DataFrame | None, list[Path]]:
+    """DORA tiles, the agent comparison and charts for the snapshot's deploys."""
+    deploys = deploys_from_raw(
+        delivery,
+        agent_authors=agent_authors,
+        hotfix_labels=hotfix_labels,
+    )
+    # the tag before the window is only there to diff the first deploy against
+    since = now - timedelta(days=delivery["days"])
+    deploys = [deploy for deploy in deploys if deploy.at >= since]
+    weekly = deployment_frequency(deploys, now)
+    lead_times = change_lead_times(deploys)
+    failure_rate = change_failure_rate(deploys)
+    tiles = build_delivery_tiles(
+        weekly,
+        lead_times,
+        failure_rate,
+        recovery_times(deploys),
+    )
+    rate = f"{failure_rate:.0%}" if failure_rate is not None else "n/a"
+    click.echo(
+        f"{delivery['project']}: {len(deploys)} deploys in {delivery['days']} days;"
+        f" change fail rate {rate}",
+    )
+    charts = [
+        output_dir / "deployment_frequency.png",
+        output_dir / "change_lead_time.png",
+    ]
+    vis_service.vis_df(
+        str(charts[0]),
+        weekly,
+        x_label="weeks",
+        y_label="deploys",
+        peak_label="deploys",
+    )
+    vis_service.vis_duration_histogram(
+        str(charts[1]),
+        list(lead_times["lead_time_days"]),
+        y_label="changes",
+    )
+    comparison = agent_comparison(deploys) if agent_authors else None
+    return tiles, comparison, charts
 
 
 def _forecast_scope(

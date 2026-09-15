@@ -85,6 +85,11 @@ TAIL_TICK_CLEARANCE = 0.08
 GRID_TAIL_TICK_CLEARANCE = 0.2
 
 
+def tail_threshold(cutoff: float) -> str:
+    """Label the tail's lower bound; below ten days whole days would round it wrong."""
+    return f"{math.floor(cutoff)}" if cutoff >= 10 else f"{cutoff:.1f}"  # noqa: PLR2004
+
+
 def body_ticks(
     ticks: list[float],
     tail_x: float,
@@ -167,9 +172,11 @@ class VisService(BaseService):
         data: dict,
         x_label: str = "x_label",
         y_label: str = "y_label",
+        peak_label: str = "finished",
     ) -> None:
         """Render a labeled bar chart with a trend line from a dict."""
         fig, ax = plt.subplots()
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         labels = list(data)
         values = list(data.values())
         if labels:
@@ -183,7 +190,7 @@ class VisService(BaseService):
             plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
             peak = int(np.argmax(values))
             ax.annotate(
-                f"{values[peak]} finished",
+                f"{values[peak]} {peak_label}",
                 xy=(peak, values[peak]),
                 xytext=(0, 6),
                 textcoords="offset points",
@@ -500,7 +507,7 @@ class VisService(BaseService):
         ticks = body_ticks(list(ax.get_xticks()), tail_x, right, clearance)
         ax.set_xticks(
             [*ticks, tail_x],
-            labels=[f"{t:.0f}" for t in ticks] + [f">{math.floor(cutoff)}"],
+            labels=[f"{t:.0f}" for t in ticks] + [f">{tail_threshold(cutoff)}"],
         )
 
     def vis_queue_grid(

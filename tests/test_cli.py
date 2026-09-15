@@ -264,3 +264,73 @@ def test_validate_config_rejects_a_focus_outside_its_range():
         errors = validate_config({"from_raw": "raw.json", "forecast_focus": focus})
         assert any("focus" in error for error in errors), focus
     assert validate_config({"from_raw": "raw.json", "forecast_focus": "0.4"}) == []
+
+
+def _delivery_raw():
+    def commit(sha, day, title="Change", author="alice"):
+        return {
+            "id": sha,
+            "title": title,
+            "author_name": author,
+            "author_email": f"{author}@example.com",
+            "committed_date": f"2026-08-{day:02d}T10:00:00.000Z",
+        }
+
+    def tag(name, sha, day):
+        return {
+            "name": name,
+            "target": sha,
+            "created_at": f"2026-08-{day:02d}T12:00:00.000Z",
+            "commit": commit(sha, day),
+        }
+
+    return {
+        "project": "group/app",
+        "days": 90,
+        "tags": [
+            tag("v1.0.0", "c1", 3),
+            tag("v1.1.0", "c3", 10),
+            tag("v1.1.1", "c4", 11),
+        ],
+        "releases": [],
+        "compares": {
+            "v1.1.0": [commit("c2", 5), commit("c3", 9, author="srv_agent")],
+            "v1.1.1": [commit("c4", 11, title='Revert "Cache"')],
+        },
+        "merge_requests": [],
+    }
+
+
+def test_cli_reports_delivery_metrics_saved_in_a_snapshot():
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=_finished_and_open_issues(),
+        delivery=_delivery_raw(),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(
+            cli,
+            ["--from-raw", "raw.json", "--agent-authors", "srv_agent"],
+        )
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    assert "group/app: 3 deploys" in result.output
+    assert "Change fail rate" in report
+    assert "<td>agents</td><td>1</td>" in report
+
+
+def test_validate_config_checks_gitlab_settings():
+    base = {"from_raw": "raw.json"}
+    bad_pattern = validate_config({**base, "deploy_tag_pattern": "v(\\d"})
+    assert any("pattern" in error for error in bad_pattern)
+    for days in ("0", "-3", "a month"):
+        errors = validate_config({**base, "delivery_days": days})
+        assert any("days" in error.lower() for error in errors), days
+    assert (
+        validate_config({**base, "deploy_tag_pattern": "^v", "delivery_days": "30"})
+        == []
+    )

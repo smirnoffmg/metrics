@@ -8,7 +8,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from metrics.services.vis import VisService, biggest_drop, body_ticks, split_tail
+from metrics.services.vis import (
+    VisService,
+    biggest_drop,
+    body_ticks,
+    split_tail,
+    tail_threshold,
+)
 
 
 def test_visservice_vis_df_creates_file(temp_png_file):
@@ -201,3 +207,9 @@ def test_body_ticks_keep_ticks_well_clear_of_the_tail():
         20.0,
         25.0,
     ]
+
+
+def test_tail_threshold_keeps_a_decimal_for_short_durations():
+    # change lead times of a few days: "3" beside a body bar at 4 misread
+    assert tail_threshold(3.7) == "3.7"
+    assert tail_threshold(487.9) == "487"

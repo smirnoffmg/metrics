@@ -8,6 +8,7 @@ import pandas as pd
 
 from metrics.services.stats import (
     Tile,
+    build_delivery_tiles,
     build_headline_tiles,
     build_stuck_rows,
     scope_forecast_tile,
@@ -120,3 +121,29 @@ def test_build_headline_tiles_leave_out_the_scope_tile_without_a_scope():
         flow_efficiency=0.0,
     )
     assert "85% of forecast scope done" not in [tile.label for tile in tiles]
+
+
+def test_build_delivery_tiles():
+    lead_times = pd.DataFrame({"lead_time_days": [1.0, 3.0, 5.0]})
+    tiles = build_delivery_tiles(
+        weekly={"2026W36": 1, "2026W37": 3},
+        lead_times=lead_times,
+        failure_rate=0.25,
+        recovery_days=[0.5, 1.5],
+    )
+    assert tiles == [
+        Tile("Deploys", "2.0/wk"),
+        Tile("Change lead time p50", "3.0d"),
+        Tile("Change fail rate", "25%"),
+        Tile("Recovery time p50", "1.0d"),
+    ]
+
+
+def test_build_delivery_tiles_without_enough_deploys():
+    tiles = build_delivery_tiles(
+        weekly={},
+        lead_times=pd.DataFrame({"lead_time_days": []}),
+        failure_rate=None,
+        recovery_days=[],
+    )
+    assert [tile.value for tile in tiles] == ["n/a", "n/a", "n/a", "no failures"]
