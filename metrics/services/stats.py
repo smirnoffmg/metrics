@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from statistics import fmean, median
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -12,6 +12,7 @@ from .backtest import (
     MIN_INDEPENDENT_OUTCOMES,
     SIGNIFICANCE,
     judgeable_summaries,
+    judged_summary,
     recalibration_helps,
 )
 from .calculator import MIN_FORECAST_HISTORY_WEEKS
@@ -44,9 +45,11 @@ class Tile:
 class Trust:
     """How far past promises like the forecast's came true, in plain words."""
 
-    word: Literal["holds", "optimistic", "unchecked"]
+    word: Literal["holds", "optimistic", "cautious", "unchecked"]
     held: int
     of: int
+    # set when a shorter replayed horizon than the forecast's judged it
+    horizon: int | None = None
 
 
 @dataclass(frozen=True)
@@ -182,31 +185,67 @@ def backtest_tile(summary: BacktestSummary | None) -> Tile:
         return Tile("past promises held", "n/a")
     label = f"past {summary.horizon}-week promises held"
     value = f"{summary.held_independent} of {summary.independent}"
-    if summary.independent < MIN_INDEPENDENT_OUTCOMES:
+    word = trust(summary).word
+    if word == "optimistic":
+        return Tile(label, value, "fewer than promised", delta_good=False)
+    if word == "cautious":
+        return Tile(label, value, "more than promised")
+    if word == "unchecked":
         return Tile(label, value, f"only {summary.independent} independent outcomes")
-    held = _held_as_promised(summary.held_independent, summary.independent)
-    return Tile(
-        label,
-        value,
-        "as promised" if held else "fewer than promised",
-        held,
-    )
+    return Tile(label, value, "as promised", delta_good=True)
 
 
 def trust(summary: BacktestSummary | None) -> Trust:
-    """Judge past promises held among those not overlapping, as backtest_tile does."""
+    """Judge past promises held among those not overlapping, as backtest_tile does.
+
+    A share held too far from 85% to be chance rejects the promise at any
+    count, but confirming it takes MIN_INDEPENDENT_OUTCOMES.
+    """
     if summary is None:
         return Trust("unchecked", 0, 0)
     held, of = summary.held_independent, summary.independent
+    if not _held_as_promised(held, of):
+        return Trust("optimistic", held, of)
+    if _held_beyond_promise(held, of):
+        return Trust("cautious", held, of)
     if of < MIN_INDEPENDENT_OUTCOMES:
         return Trust("unchecked", held, of)
-    return Trust("holds" if _held_as_promised(held, of) else "optimistic", held, of)
+    return Trust("holds", held, of)
+
+
+def heeded_trust(
+    judged: BacktestSummary | None,
+    summaries: Sequence[BacktestSummary],
+) -> Trust:
+    """Trust at the judged horizon, unless a shorter one of the same model rejects it.
+
+    The judged horizon may have too few outcomes to say anything, while a
+    shorter one already shows its promises failing beyond chance.
+    """
+    judged_trust = trust(judged)
+    if judged is None or judged_trust.word == "optimistic":
+        return judged_trust
+    shorter = sorted(
+        (s for s in summaries if s.horizon < judged.horizon),
+        key=lambda s: s.horizon,
+        reverse=True,
+    )
+    for summary in shorter:
+        if (found := trust(summary)).word == "optimistic":
+            return replace(found, horizon=summary.horizon)
+    return judged_trust
 
 
 def _held_as_promised(held: int, of: int) -> bool:
     # an honest 85% promise scores 9 or fewer of 11 about half the time, so only
     # a share too low to be chance shows the forecast is optimistic
     return bool(stats.binom.cdf(held, of, CLAIMED_CHANCE) >= SIGNIFICANCE)
+
+
+def _held_beyond_promise(held: int, of: int) -> bool:
+    # the other tail: 55 of 55 is not "as promised" but a number set too low;
+    # it takes 19 outcomes before even all of them held can be told from chance
+    return bool(stats.binom.sf(held - 1, of, CLAIMED_CHANCE) < SIGNIFICANCE)
 
 
 def forecast_verdict(  # noqa: PLR0913
@@ -216,12 +255,16 @@ def forecast_verdict(  # noqa: PLR0913
     flow: BacklogFlow | None,
     dates: DateSummary | None,
     release: Sequence[str] = (),
+    *,
+    release_trust: Trust | None = None,
+    release_at_least: float | None = None,
 ) -> list[str]:
     """Say what to expect of the open issues, how far to trust it and what to do.
 
     Natural frequencies ("held 17 of 20 times") rather than percentages, and
     an action last, so the page answers whether to act before any chart.
-    The release's lines go just before the action.
+    The release's lines go just before the action, which also heeds the
+    release's own trust and number when it was paced by its own finishes.
     """
     if not open_work or not forecast:
         # the first week may start before the query's window and is left out
@@ -230,9 +273,14 @@ def forecast_verdict(  # noqa: PLR0913
             f" {MIN_FORECAST_HISTORY_WEEKS + 1} weeks of finished work.",
             *release,
         ]
-    verdict = [
+    promise = (
         f"At least {open_work['at_least_85']:.0f} of the {open_work['n_open']}"
-        f" open issues will be done in {open_work['horizon']} weeks,"
+        " open issues will be done"
+        if open_work["at_least_85"]
+        else f"None of the {open_work['n_open']} open issues can be promised done"
+    )
+    verdict = [
+        f"{promise} in {open_work['horizon']} weeks,"
         f" by {open_work['by_date']:%d %b %Y} (85% chance).",
         _trust_sentence(trust, open_work["horizon"]),
     ]
@@ -246,7 +294,23 @@ def forecast_verdict(  # noqa: PLR0913
         )
     verdict.append(_clear_date_sentence(forecast, dates))
     verdict += release
+    if not open_work["at_least_85"]:
+        verdict.append(
+            "Don't commit to a number or a date yet:"
+            " the forecast cannot promise any of the open issues.",
+        )
+        return verdict
     action = _ACTIONS[trust.word]
+    # a release with no number of its own has none to treat as optimistic
+    if (
+        release_at_least
+        and release_trust is not None
+        and release_trust.word == "optimistic"
+    ):
+        action = (
+            "Treat the release's number as optimistic"
+            " and commit to fewer of its issues."
+        )
     if behind or forecast["p85_date"] is None:
         action = f"{action[:-1]}, but don't promise a date for all of it" + (
             "."
@@ -254,17 +318,28 @@ def forecast_verdict(  # noqa: PLR0913
             else "; forecast a specific release instead (--forecast-jql)."
         )
     verdict.append(action)
+    if release_at_least == 0:
+        verdict.append(
+            "For the release, don't commit to a number or a date yet:"
+            " the forecast cannot promise any of its issues.",
+        )
     return verdict
 
 
 _ACTIONS: dict[str, str] = {
     "holds": "Commit to the number.",
     "optimistic": "Treat the number as optimistic and commit to fewer.",
+    "cautious": "Commit to the number and expect more.",
     "unchecked": "Treat the number as a guess until more history builds up.",
 }
 
 
 def _trust_sentence(trust: Trust, horizon: int) -> str:
+    if trust.horizon is not None and trust.horizon != horizon:
+        return (
+            f"Past {trust.horizon}-week promises of this forecast held only"
+            f" {trust.held} of {trust.of} times, fewer than the 85% promised."
+        )
     if trust.word == "holds":
         return (
             f"Past {horizon}-week promises like this one"
@@ -275,6 +350,12 @@ def _trust_sentence(trust: Trust, horizon: int) -> str:
         return (
             f"Past {horizon}-week promises like this one held only"
             f" {trust.held} of {trust.of} times, fewer than the 85% promised."
+        )
+    if trust.word == "cautious":
+        return (
+            f"Past {horizon}-week promises like this one held {trust.held}"
+            f" of {trust.of} times, more than the 85% promised:"
+            " the number is cautious."
         )
     return (
         f"There is too little history to check it: {trust.of} past"
@@ -297,6 +378,11 @@ def _clear_date_sentence(
             f"All {forecast['backlog']} {issues} done"
             f" by {forecast['p85_date']:%d %b %Y} (85% chance)"
         )
+    if dates is not None and not _held_as_promised(dates.held, dates.judged):
+        return (
+            f"{sentence}; past dates like it held only {dates.held}"
+            f" of {dates.judged}, fewer than the 85% promised."
+        )
     if dates is not None and dates.judged >= MIN_INDEPENDENT_OUTCOMES:
         return f"{sentence}; past dates like it held {dates.held} of {dates.judged}."
     if dates is not None and dates.judged:
@@ -307,6 +393,13 @@ def _clear_date_sentence(
         )
     # beyond the checked horizon nothing replays the date, and it leans optimistic
     return f"{sentence}; no past date like it has come due to check it."
+
+
+def promised_done(open_work: dict[str, Any], issues: str) -> str:
+    """At least how many of the issues get done, or that none can be promised."""
+    if not open_work["at_least_85"]:
+        return f"none of {issues} can be promised done"
+    return f"at least {open_work['at_least_85']:.0f} of {issues} done"
 
 
 def assumed_pace_note(focus: float | None) -> str:
@@ -333,9 +426,9 @@ def scope_verdict(
     if scope.basis == "measured" and open_work:
         # the trust is earned by replaying the H-week promise, so it must follow
         # that promise; the clear date gets its own, separate check
+        promise = promised_done(open_work, f"its {open_work['n_open']} open issues")
         return [
-            f"Release {jql}: at least {open_work['at_least_85']:.0f} of its"
-            f" {open_work['n_open']} open issues done in {open_work['horizon']}"
+            f"Release {jql}: {promise} in {open_work['horizon']}"
             f" weeks, by {open_work['by_date']:%d %b %Y} (85% chance),"
             " paced by its own finishes.",
             _trust_sentence(trust, open_work["horizon"]),
@@ -364,9 +457,19 @@ def diagnose_backtest(summaries: Sequence[BacktestSummary]) -> str:
     bias = min(tested, key=lambda s: s.bias_p or 0.0)
     horizons = _horizons(tested)
     if drift.trend_p is not None and drift.trend_p < SIGNIFICANCE:
+        judged = judged_summary(summaries)
+        # the verdict reads the judged horizon, so its own test must show too
+        also = (
+            f"; at {judged.horizon} weeks, the horizon judged,"
+            f" y-plot p = {judged.trend_p:.3f}"
+            if judged is not None
+            and judged.horizon != drift.horizon
+            and judged.trend_p is not None
+            else ""
+        )
         return (
             f"{drift.horizon}-week forecast errors drift over time"
-            f" (y-plot p = {drift.trend_p:.3f}): the team's pace changes,"
+            f" (y-plot p = {drift.trend_p:.3f}{also}): the team's pace changes,"
             " so correcting forecasts by their past errors would not hold."
         )
     if bias.bias_p is not None and bias.bias_p < SIGNIFICANCE:

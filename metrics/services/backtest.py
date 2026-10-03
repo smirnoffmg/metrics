@@ -77,13 +77,15 @@ class BacktestSummary:
     """How past forecasts held up, taken together."""
 
     horizon: int
+    # forecasts promising at least one issue; held_85 is a share of these
     count: int
-    # forecasts that can be picked with no outcome week in common
+    # of those, the ones that can be picked with no outcome week in common
     independent: int
     held_85: float
+    # over every forecast: one promising none still scores its spread
     kolmogorov: float
     mean_crps: float
-    # Kolmogorov-Smirnov p-values over independent forecasts: u-plot for a
+    # Kolmogorov-Smirnov p-values over independent promises: u-plot for a
     # consistent bias, y-plot for errors drifting over time; None if untestable
     bias_p: float | None = None
     trend_p: float | None = None
@@ -261,7 +263,9 @@ def forecast_open_work(  # noqa: PLR0913
     return {
         "horizon": horizon,
         "n_open": n_open,
-        "at_least_85": float(np.percentile(totals, 15, method="lower")),
+        # recalibrated totals are fractional, and with whole issues done "at
+        # least 12.8" is kept only by 13, as the backtest judges it
+        "at_least_85": float(np.ceil(np.percentile(totals, 15, method="lower"))),
         "by_date": (now + timedelta(weeks=horizon)).date(),
         "recalibrated": past_us is not None,
     }
@@ -413,7 +417,12 @@ def backtest_open_work(  # noqa: PLR0913
             count for week, count in known.throughput.items() if week != weeks[0]
         ]
         shares = [s for s in shares_by_window[: max(0, i - horizon)] if s is not None]
-        if len(history) < min_history or len(shares) < min_shares:
+        # with nothing open, "none of none done" holds whatever the forecast
+        if (
+            len(history) < min_history
+            or len(shares) < min_shares
+            or not known.open_keys
+        ):
             continue
         later = moment_at(_midnight(origin + timedelta(weeks=horizon)))
         actual = len(known.open_keys & later.done_keys)
@@ -646,16 +655,21 @@ def judged_summary(
 
 
 def summarize_backtests(results: Sequence[Backtest]) -> BacktestSummary | None:
-    """Share of 85% claims that held, distance from honest u values, mean CRPS."""
-    if not results:
+    """Share of 85% claims that held, distance from honest u values, mean CRPS.
+
+    A forecast of at least 0 promises nothing and cannot fail, so it is left
+    out of the held counts; None when no forecast promised anything.
+    """
+    promises = [r for r in results if r.at_least_85 > 0]
+    if not promises:
         return None
-    picked = independent_forecasts(results)
+    picked = independent_forecasts(promises)
     independent = [r.u for r in picked]
     return BacktestSummary(
         horizon=results[0].horizon,
-        count=len(results),
+        count=len(promises),
         independent=len(independent),
-        held_85=fmean(r.actual >= r.at_least_85 for r in results),
+        held_85=fmean(r.actual >= r.at_least_85 for r in promises),
         kolmogorov=kolmogorov_distance([r.u for r in results]),
         mean_crps=fmean(r.crps for r in results),
         bias_p=float(stats.kstest(independent, "uniform").pvalue),

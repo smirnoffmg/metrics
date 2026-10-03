@@ -120,10 +120,11 @@ from metrics.services.stats import (
     date_check_note,
     diagnose_backtest,
     forecast_verdict,
+    heeded_trust,
+    promised_done,
     recalibration_note,
     scope_forecast_tile,
     scope_verdict,
-    trust,
     unmeasured_share_note,
 )
 
@@ -695,7 +696,7 @@ def calculate_metrics(  # noqa: PLR0913
             ),
         )
 
-    scope_tile = None
+    scope_tile = release_trust = None
     release: list[str] = []
     scope_open_work: dict[str, Any] = {}
     if repo.snapshot.forecast_jql:
@@ -725,7 +726,10 @@ def calculate_metrics(  # noqa: PLR0913
         release = scope_verdict(
             repo.snapshot.forecast_jql,
             scoped,
-            trust(judged_summary(list(scope_runs.values()))),
+            release_trust := heeded_trust(
+                judged_summary(list(scope_runs.values())),
+                list(scope_runs.values()),
+            ),
             forecast_focus,
         )
         if scope_forecast:
@@ -748,10 +752,12 @@ def calculate_metrics(  # noqa: PLR0913
     verdict = forecast_verdict(
         open_work,
         forecast,
-        trust(judged),
+        heeded_trust(judged, backtests.get(used_model or "", [])),
         flow,
         dates,
         release,
+        release_trust=release_trust,
+        release_at_least=scope_open_work.get("at_least_85"),
     )
 
     fragments += [
@@ -882,10 +888,8 @@ def _forecast(  # noqa: PLR0913
     }
     if note := unmeasured_share_note(open_work, "open issues"):
         click.echo(f"Forecast: {note}")
-    click.echo(
-        f"Forecast: at least {open_work['at_least_85']:.0f}"
-        f" of {open_work['n_open']} open issues done in {horizon} weeks (85%)",
-    )
+    promise = promised_done(open_work, f"{open_work['n_open']} open issues")
+    click.echo(f"Forecast: {promise} in {horizon} weeks (85%)")
     checked = _report_backtest(
         open_work,
         model,
@@ -1229,10 +1233,8 @@ def _measured_scope(
     }
     if note := unmeasured_share_note(open_work, "its open issues"):
         click.echo(f"Scope: {note}")
-    click.echo(
-        f"Scope: at least {open_work['at_least_85']:.0f}"
-        f" of {open_work['n_open']} open issues done in {horizon} weeks (85%)",
-    )
+    promise = promised_done(open_work, f"{open_work['n_open']} open issues")
+    click.echo(f"Scope: {promise} in {horizon} weeks (85%)")
     for h, summary in summaries.items():
         click.echo(
             f"Scope backtest: held {summary.held_independent} of"

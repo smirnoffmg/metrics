@@ -826,3 +826,55 @@ def test_moment_of_counts_throughput_since_the_history_start():
     )
     assert list(moment.throughput) == ["2024W01", "2024W02", "2024W03"]
     assert moment.done_keys == {"DONE-2017", "DONE-2024"}
+
+
+def test_open_work_backtest_skips_origins_with_nothing_open():
+    # nothing is open from week 21 on, while new work keeps the history going
+    world = [
+        *_steady_clearing_world(),
+        *((f"NEW-{w}", w, w) for w in range(21, 40)),
+    ]
+    known_at = _moment_known_at(world)
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(40)]
+    results = backtest_open_work(
+        known_at, weeks, horizon=2, pace=Pace(window=4), min_history=4, min_shares=4
+    )
+    assert results
+    assert results[-1].origin == MONDAY + timedelta(weeks=20)
+
+
+def test_summary_leaves_forecasts_promising_none_out_of_the_held():
+    results = [
+        replace(
+            _backtest(0.5, actual=actual, at_least_85=promise, score=1.0),
+            origin=MONDAY + timedelta(weeks=4 * i),
+        )
+        for i, (actual, promise) in enumerate([(0, 0), (8, 5), (3, 5), (9, 0)])
+    ]
+    summary = summarize_backtests(results)
+    assert summary is not None
+    # "at least 0" cannot fail, so it is no promise to count as held
+    assert summary.count == 2  # noqa: PLR2004
+    assert summary.independent == 2  # noqa: PLR2004
+    assert summary.held_independent == 1
+    assert summary.held_85 == pytest.approx(0.5)
+
+
+def test_summary_of_forecasts_promising_none_is_none():
+    assert summarize_backtests([_backtest(0.5, 3, 0, 1.0)]) is None
+
+
+def test_forecast_open_work_recalibrated_promises_a_whole_number():
+    # u = 0.2045 lands the corrected 15th percentile between 12 and 13 simulated
+    fc = forecast_open_work(
+        40,
+        [3, 9, 4, 12, 6, 8, 5, 11],
+        [0.5],
+        horizon=4,
+        pace=Pace(window=6),
+        past_us=[0.2045] * 12,
+        now=datetime(2024, 3, 6, tzinfo=UTC),
+        seed=5,
+    )
+    # the backtest holds "at least 12.8" only at 13 done, so that is the promise
+    assert fc["at_least_85"] == 13  # noqa: PLR2004

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pandas as pd
@@ -21,7 +22,9 @@ from metrics.services.stats import (
     diagnose_backtest,
     flow_tile,
     forecast_verdict,
+    heeded_trust,
     open_work_tile,
+    promised_done,
     recalibration_note,
     scope_forecast_tile,
     scope_verdict,
@@ -300,8 +303,9 @@ def test_diagnosis_finds_drift_at_any_horizon_with_enough_outcomes():
         ],
     )
     assert note == (
-        "4-week forecast errors drift over time (y-plot p = 0.035): the team's pace"
-        " changes, so correcting forecasts by their past errors would not hold."
+        "4-week forecast errors drift over time (y-plot p = 0.035; at 8 weeks,"
+        " the horizon judged, y-plot p = 0.298): the team's pace changes,"
+        " so correcting forecasts by their past errors would not hold."
     )
 
 
@@ -678,3 +682,212 @@ def test_forecast_verdict_flow_keeps_the_decimal_that_decides_behind():
     assert (
         "About 5.4 issues arrive and 4.6 get done a week; more arrive than get done."
     ) in verdict
+
+
+def test_trust_calls_far_more_held_than_promised_cautious():
+    # P(X >= 55 | 55, 0.85) is about 1e-4: an 85% promise keeps fewer
+    assert trust(_summary(55, independent=55)) == Trust("cautious", 55, 55)
+    # P(X >= 11 | 11, 0.85) is about 0.17, within chance
+    assert trust(_summary(11, independent=11)) == Trust("holds", 11, 11)
+
+
+def test_trust_calls_optimistic_from_few_outcomes_beyond_chance():
+    # P(X <= 0 | 3, 0.85) is about 0.003 and P(X <= 1 | 4, 0.85) about 0.012
+    assert trust(_summary(0, independent=3)) == Trust("optimistic", 0, 3)
+    assert trust(_summary(1, independent=4)) == Trust("optimistic", 1, 4)
+    assert trust(_summary(5, independent=9)) == Trust("optimistic", 5, 9)
+    # too few to confirm a promise kept, though
+    assert trust(_summary(4, independent=4)) == Trust("unchecked", 4, 4)
+
+
+def test_backtest_tile_says_fewer_than_promised_from_few_outcomes():
+    tile = backtest_tile(_summary(0, independent=3))
+    assert tile.delta_text == "fewer than promised"
+    assert tile.delta_good is False
+
+
+def test_backtest_tile_says_more_than_promised_when_cautious():
+    tile = backtest_tile(_summary(108, independent=108))
+    assert tile.delta_text == "more than promised"
+    assert tile.delta_good is None
+
+
+def test_forecast_verdict_calls_a_number_held_far_more_often_cautious():
+    verdict = forecast_verdict(
+        _open_work(), _dated_forecast(), Trust("cautious", 108, 108), None, None
+    )
+    assert verdict[1] == (
+        "Past 8-week promises like this one held 108 of 108 times,"
+        " more than the 85% promised: the number is cautious."
+    )
+    assert verdict[-1] == "Commit to the number and expect more."
+
+
+def test_forecast_verdict_promising_none_does_not_say_commit():
+    verdict = forecast_verdict(
+        _open_work(at_least_85=0.0),
+        _dated_forecast(p85=None, p85_date=None),
+        Trust("holds", 17, 20),
+        BacklogFlow(arrived=30.0, finished=24.0),
+        None,
+    )
+    assert verdict[0] == (
+        "None of the 151 open issues can be promised done in 8 weeks,"
+        " by 01 Mar 2024 (85% chance)."
+    )
+    assert "Commit" not in " ".join(verdict)
+    assert verdict[-1] == (
+        "Don't commit to a number or a date yet:"
+        " the forecast cannot promise any of the open issues."
+    )
+
+
+def test_forecast_verdict_does_not_say_commit_under_an_optimistic_release():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("holds", 17, 20),
+        None,
+        None,
+        ["Release fixVersion = 7.2: at least 3 of its 10 open issues done."],
+        release_trust=Trust("optimistic", 1, 4),
+        release_at_least=3.0,
+    )
+    assert verdict[-1] == (
+        "Treat the release's number as optimistic and commit to fewer of its issues."
+    )
+
+
+def test_scope_verdict_says_none_can_be_promised_for_at_least_zero():
+    verdict = scope_verdict(
+        "fixVersion = 7.2",
+        ScopeResult(
+            _dated_forecast(backlog=10),
+            _open_work(n_open=10, at_least_85=0.0),
+            {},
+            None,
+            "measured",
+        ),
+        Trust("unchecked", 0, 0),
+    )
+    assert verdict[0] == (
+        "Release fixVersion = 7.2: none of its 10 open issues can be promised done"
+        " in 8 weeks, by 01 Mar 2024 (85% chance), paced by its own finishes."
+    )
+
+
+def test_clear_date_says_fewer_than_promised_from_few_dates_beyond_chance():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("holds", 17, 20),
+        None,
+        DateSummary(held=0, judged=5, not_due=3),
+    )
+    # P(X <= 0 | 5, 0.85) is about 8e-5
+    assert verdict[-2] == (
+        "All 151 open issues done by 01 Jul 2024 (85% chance);"
+        " past dates like it held only 0 of 5, fewer than the 85% promised."
+    )
+
+
+def test_diagnosis_of_drift_cites_the_judged_horizon_too():
+    note = diagnose_backtest(
+        [
+            _tested(4, 24, bias_p=0.5, trend_p=0.03),
+            _tested(8, 12, bias_p=0.5, trend_p=0.2),
+        ],
+    )
+    assert note == (
+        "4-week forecast errors drift over time (y-plot p = 0.030;"
+        " at 8 weeks, the horizon judged, y-plot p = 0.200): the team's pace"
+        " changes, so correcting forecasts by their past errors would not hold."
+    )
+
+
+def test_forecast_verdict_ignores_the_trust_of_a_release_with_no_number():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("holds", 8, 11),
+        None,
+        None,
+        ["Release fixVersion = 2.7.0: nothing left to forecast."],
+        release_trust=Trust("optimistic", 0, 3),
+        release_at_least=None,
+    )
+    assert verdict[-1] == "Commit to the number."
+
+
+def test_forecast_verdict_keeps_the_team_action_when_the_release_promises_none():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("optimistic", 6, 11),
+        None,
+        None,
+        ["Release fixVersion = 2.3.0: none of its 1 open issues can be promised."],
+        release_trust=Trust("unchecked", 0, 0),
+        release_at_least=0.0,
+    )
+    assert verdict[-2:] == [
+        "Treat the number as optimistic and commit to fewer.",
+        "For the release, don't commit to a number or a date yet:"
+        " the forecast cannot promise any of its issues.",
+    ]
+
+
+def test_heeded_trust_takes_a_rejection_at_a_shorter_horizon():
+    four = replace(_summary(0, independent=3), horizon=4)
+    eight = _summary(0, independent=1)
+    # P(X <= 0 | 3, 0.85) is about 0.003, while 0 of 1 is within chance
+    assert heeded_trust(eight, [four, eight]) == Trust("optimistic", 0, 3, horizon=4)
+
+
+def test_heeded_trust_keeps_the_judged_horizon_without_a_shorter_rejection():
+    four = replace(_summary(4, independent=4), horizon=4)
+    eight = _summary(11, independent=12)
+    assert heeded_trust(eight, [four, eight]) == Trust("holds", 11, 12)
+    longer = replace(_summary(0, independent=3), horizon=12)
+    assert heeded_trust(eight, [eight, longer]) == Trust("holds", 11, 12)
+    assert heeded_trust(None, []) == Trust("unchecked", 0, 0)
+
+
+def test_forecast_verdict_names_the_shorter_horizon_that_rejects_it():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("optimistic", 0, 3, horizon=4),
+        None,
+        None,
+    )
+    assert verdict[1] == (
+        "Past 4-week promises of this forecast held only 0 of 3 times,"
+        " fewer than the 85% promised."
+    )
+    assert verdict[-1] == "Treat the number as optimistic and commit to fewer."
+
+
+def test_promised_done_says_none_for_at_least_zero():
+    assert promised_done(_open_work(), "151 open issues") == (
+        "at least 31 of 151 open issues done"
+    )
+    assert promised_done(_open_work(at_least_85=0.0), "its 1 open issues") == (
+        "none of its 1 open issues can be promised done"
+    )
+
+
+def test_diagnosis_of_drift_cites_the_horizon_the_verdict_judges():
+    # the verdict judges 12 weeks, whose drift is untestable: no other is named
+    note = diagnose_backtest(
+        [
+            _tested(4, 24, bias_p=0.5, trend_p=0.03),
+            _tested(8, 12, bias_p=0.5, trend_p=0.2),
+            _tested(12, 12, bias_p=0.5, trend_p=None),
+        ],
+    )
+    assert note == (
+        "4-week forecast errors drift over time (y-plot p = 0.030):"
+        " the team's pace changes, so correcting forecasts by their past"
+        " errors would not hold."
+    )
