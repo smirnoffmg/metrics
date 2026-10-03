@@ -371,8 +371,8 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     "--forecast-jql",
     envvar="JIRA_FORECAST_JQL",
     help="JQL naming the issues to forecast, such as an epic or a release"
-    " (e.g. 'fixVersion = 7.2'); paced by its own past finishes, or by the whole"
-    " team's when it has too few or --forecast-focus is given.",
+    " (e.g. 'fixVersion = 7.2'); paced by its own past finishes, or by the"
+    " team's when it has too few or --forecast-focus gives its share.",
 )
 @click.option(
     "--forecast-focus",
