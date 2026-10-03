@@ -73,6 +73,7 @@ class JiraDataConverter:
             last_finish_status_at=changelog_data["last_finish_status_at"],
             discarded=changelog_data["discarded"],
             resolved_at=self._resolved_at(data_item["fields"]),
+            resolution=(data_item["fields"].get("resolution") or {}).get("name"),
             in_backlog=self._is_backlog(
                 status["name"].lower(),
                 (status_categories or {}).get(status.get("id") or ""),

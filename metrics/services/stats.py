@@ -202,19 +202,27 @@ def scope_forecast_tile(
     )
 
 
-def backtest_tile(summary: BacktestSummary | None) -> Tile:
-    """How many past promises over the horizon came true, of those not overlapping."""
+def backtest_tile(
+    summary: BacktestSummary | None,
+    summaries: Sequence[BacktestSummary] = (),
+) -> Tile:
+    """How many past promises came true, of those not overlapping.
+
+    It reads the horizon heeded_trust judges by, as the verdict does, so a
+    shorter horizon that rejects the forecast is the one shown.
+    """
     if summary is None:
         return Tile("past promises held", "n/a")
-    label = f"past {summary.horizon}-week promises held"
-    value = f"{summary.held_independent} of {summary.independent}"
-    word = trust(summary).word
+    heeded = heeded_trust(summary, summaries)
+    label = f"past {heeded.horizon or summary.horizon}-week promises held"
+    value = f"{heeded.held} of {heeded.of}"
+    word = heeded.word
     if word == "optimistic":
         return Tile(label, value, "fewer than promised", delta_good=False)
     if word == "cautious":
         return Tile(label, value, "more than promised")
     if word == "unchecked":
-        return Tile(label, value, f"only {summary.independent} independent outcomes")
+        return Tile(label, value, f"only {heeded.of} independent outcomes")
     return Tile(label, value, "as promised", delta_good=True)
 
 
@@ -590,8 +598,16 @@ def unmeasured_share_note(open_work: dict[str, Any], subject: str) -> str | None
     )
 
 
-def bulk_closure_note(throughput: dict[str, int]) -> str | None:
-    """Name the biggest week finishing over BULK_CLOSURE_FACTOR times the median."""
+def bulk_closure_note(
+    throughput: dict[str, int],
+    delivered: dict[str, int],
+) -> str | None:
+    """Name the biggest week finishing over BULK_CLOSURE_FACTOR times the median.
+
+    delivered counts each week's finishes resolved as delivery: when most of
+    the week's are, it was a release batch-close, and discarding its
+    resolution would drop real work.
+    """
     typical = median(throughput.values()) if throughput else 0
     if not typical:
         return None
@@ -605,11 +621,18 @@ def bulk_closure_note(throughput: dict[str, int]) -> str | None:
     count, week = bulk[-1]
     more = len(bulk) - 1
     also = f" ({more} more such week{'s' if more > 1 else ''})" if more else ""
-    return (
+    spike = (
         f"Bulk closure: {week} finished {count} issues, over {BULK_CLOSURE_FACTOR}"
-        f" times the median week's {typical:g}{also}; it inflates the pace."
-        " If these were not delivered, add their resolution to"
-        " --discarded-resolutions."
+        f" times the median week's {typical:g}{also}"
+    )
+    if 2 * delivered.get(week, 0) > count:
+        return (
+            f"{spike}; most were resolved as delivered, so a release closed in"
+            " one week inflates the pace."
+        )
+    return (
+        f"{spike}; it inflates the pace. If these were not delivered, add their"
+        " resolution to --discarded-resolutions."
     )
 
 

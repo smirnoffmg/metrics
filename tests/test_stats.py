@@ -265,6 +265,20 @@ def test_backtest_tile_does_not_judge_on_few_independent_outcomes():
     assert tile.delta_good is None
 
 
+def test_backtest_tile_shows_the_shorter_horizon_the_verdict_heeds():
+    # MDEV: 9 of 11 at 8 weeks is within chance, 16 of 23 at 4 weeks is not
+    four = replace(_summary(16, independent=23), horizon=4)
+    eight = _summary(9, independent=11)
+    assert backtest_tile(eight, [four, eight]) == Tile(
+        "past 4-week promises held",
+        "16 of 23",
+        "fewer than promised",
+        delta_good=False,
+    )
+    held = replace(_summary(20, independent=23), horizon=4)
+    assert backtest_tile(eight, [held, eight]).value == "9 of 11"
+
+
 def test_backtest_tile_without_enough_history():
     assert backtest_tile(None).value == "n/a"
 
@@ -449,9 +463,12 @@ def test_unmeasured_share_note_only_when_the_share_was_assumed():
 
 def test_bulk_closure_note_names_a_week_over_five_times_the_median():
     throughput = {f"2024W{w:02d}": 10 for w in range(1, 10)}
-    assert bulk_closure_note(throughput) is None
-    assert bulk_closure_note({**throughput, "2024W05": 50}) is None
-    note = bulk_closure_note({**throughput, "2024W05": 51, "2024W07": 400})
+    assert bulk_closure_note(throughput, {}) is None
+    assert bulk_closure_note({**throughput, "2024W05": 50}, {}) is None
+    note = bulk_closure_note(
+        {**throughput, "2024W05": 51, "2024W07": 400},
+        {"2024W07": 200},
+    )
     assert note == (
         "Bulk closure: 2024W07 finished 400 issues, over 5 times the median week's"
         " 10 (1 more such week); it inflates the pace. If these were not delivered,"
@@ -461,8 +478,19 @@ def test_bulk_closure_note_names_a_week_over_five_times_the_median():
 
 def test_bulk_closure_note_without_a_typical_week():
     # most weeks finish nothing: no median to measure a spike against
-    assert bulk_closure_note({"2024W01": 0, "2024W02": 0, "2024W03": 9}) is None
-    assert bulk_closure_note({}) is None
+    assert bulk_closure_note({"2024W01": 0, "2024W02": 0, "2024W03": 9}, {}) is None
+    assert bulk_closure_note({}, {}) is None
+
+
+def test_bulk_closure_note_reads_a_delivered_batch_as_a_release():
+    # CAMEL 2026W29: 162 of 183 closed as Fixed over three days of a release
+    throughput = {f"2024W{w:02d}": 10 for w in range(1, 10)}
+    note = bulk_closure_note({**throughput, "2024W07": 183}, {"2024W07": 162})
+    assert note == (
+        "Bulk closure: 2024W07 finished 183 issues, over 5 times the median week's"
+        " 10; most were resolved as delivered, so a release closed in one week"
+        " inflates the pace."
+    )
 
 
 def _dated_forecast(**changes) -> dict:

@@ -45,6 +45,7 @@ from dependency_injector.wiring import Provide, inject
 from metrics.consts import (
     ACTIVE_STATUSES,
     BACKLOG_STATUSES,
+    DELIVERY_RESOLUTIONS,
     DISCARDED_RESOLUTIONS,
     DISCARDED_STATUSES,
     DONE_STATUSES,
@@ -773,7 +774,7 @@ def calculate_metrics(  # noqa: PLR0913
         open_work,
         forecast,
         flow_efficiency(issues, active_statuses),
-        backtest=backtest_tile(judged),
+        backtest=backtest_tile(judged, backtests.get(used_model or "", [])),
         scope_tile=scope_tile,
         flow=flow,
     )
@@ -800,7 +801,12 @@ def calculate_metrics(  # noqa: PLR0913
         agent_comparison=comparison,
         backtests=backtests,
         used_model=used_model,
-        backtest_note=_method_note(backtest_note, dates, open_work, throughput),
+        backtest_note=_method_note(
+            backtest_note,
+            dates,
+            open_work,
+            _bulk_closure(issues, throughput, now, since),
+        ),
         verdict=verdict,
         method_images=[backtest_chart] if backtest_chart else [],
         delivery_tiles=delivery_tiles,
@@ -809,15 +815,29 @@ def calculate_metrics(  # noqa: PLR0913
     click.echo(f"Report: {report_path}")
 
 
+def _bulk_closure(
+    issues: list[Issue],
+    throughput: dict[str, int],
+    now: datetime,
+    since: date | None,
+) -> str | None:
+    delivered = weekly_throughput(
+        [i for i in issues if (i.resolution or "").lower() in DELIVERY_RESOLUTIONS],
+        now=now,
+        since=since,
+    )
+    return bulk_closure_note(throughput, delivered)
+
+
 def _method_note(
     backtest_note: str | None,
     dates: DateSummary | None,
     open_work: dict[str, Any],
-    throughput: dict[str, int],
+    bulk: str | None,
 ) -> str | None:
     share_note = unmeasured_share_note(open_work, "open issues")
     parts = (
-        bulk_closure_note(throughput),
+        bulk,
         backtest_note,
         date_check_note(dates) if dates else None,
         f"Forecast: {share_note}." if share_note else None,
@@ -846,7 +866,7 @@ def _forecast(  # noqa: PLR0913
     """
     now = repo.snapshot.fetched_at
     weeks = list(throughput)
-    if bulk := bulk_closure_note(throughput):
+    if bulk := _bulk_closure(issues, throughput, now, since):
         click.echo(bulk)
     if not any(issue.is_open for issue in issues):
         return DEFAULT_PACE, {}, {}, None, None

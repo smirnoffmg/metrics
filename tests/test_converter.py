@@ -476,6 +476,16 @@ def test_converter_records_when_jira_resolved_the_issue():
     assert converted(None, "2024-03-07T10:00:00.000+0000").resolved_at is None
 
 
+def test_converter_keeps_the_resolution_name():
+    data_item = _issue_moving_through(
+        ("2024-01-05", "Open", "Closed"),
+        resolution="Fixed",
+    )
+    assert JiraDataConverter().convert_data_to_issue(data_item).resolution == "Fixed"
+    unresolved = _issue_moving_through(("2024-01-05", "Open", "In Progress"))
+    assert JiraDataConverter().convert_data_to_issue(unresolved).resolution is None
+
+
 def test_converter_accepts_custom_discarded_resolutions():
     data_item = _issue_moving_through(
         ("2024-01-05", "Open", "Done"),

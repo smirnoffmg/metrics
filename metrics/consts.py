@@ -52,3 +52,13 @@ DISCARDED_RESOLUTIONS: Final[list[str]] = [
 ]
 
 BACKLOG_STATUSES: Final[list[str]] = ["open", "new", "backlog", "to do", "reopened"]
+
+# The resolutions public trackers close delivered work with; a bulk week of
+# them is a release batch-close, not triage to discard.
+DELIVERY_RESOLUTIONS: Final[list[str]] = [
+    "fixed",
+    "done",
+    "resolved",
+    "implemented",
+    "delivered",
+]

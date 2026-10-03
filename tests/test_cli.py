@@ -917,6 +917,35 @@ def test_cli_and_report_method_warn_of_a_bulk_closure():
     assert warning in method
 
 
+def test_cli_does_not_advise_discarding_a_delivered_release_batch():
+    bulk = [
+        _raw_issue(
+            f"X-bulk-{n}",
+            "Closed",
+            ("2026-05-06", "Open", "Closed"),
+            resolution="Fixed",
+        )
+        for n in range(40)
+    ]
+    for issue in bulk:
+        # undated, so the history still starts with the uneven weeks
+        issue["fields"]["resolutiondate"] = None
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=[*_uneven_weeks_issues(), *bulk],
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+    assert "Bulk closure: 2026W19 finished" in result.output
+    assert "resolved as delivered" in result.output
+    assert "--discarded-resolutions" not in result.output
+
+
 def test_cli_refuses_a_forecast_query_the_snapshot_was_not_saved_with():
     snapshot = Snapshot(
         server="https://jira.example",
