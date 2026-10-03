@@ -29,6 +29,7 @@ class Issue:
     started_at: datetime | None = None
     last_finish_status_at: datetime | None = None
     discarded: bool = False
+    in_backlog: bool = False
 
     status_history: list[str] = field(default_factory=list)
     status_transitions: list[StatusTransition] = field(default_factory=list)

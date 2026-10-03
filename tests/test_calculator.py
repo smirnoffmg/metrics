@@ -404,6 +404,19 @@ def test_aging_wip_skips_discarded_issues():
     assert list(df["key"]) == ["O-0"]
 
 
+def test_aging_wip_skips_started_issues_sent_back_to_the_backlog():
+    returned = Issue(
+        key="R",
+        status="New",
+        created_at=datetime(2006, 5, 4, tzinfo=UTC),
+        started_at=datetime(2007, 4, 23, tzinfo=UTC),
+        in_backlog=True,
+    )
+    started = _open_issues(1, started_at=datetime(2024, 1, 2, tzinfo=UTC))
+    df = aging_wip([*started, returned], now=datetime(2024, 1, 10, tzinfo=UTC))
+    assert list(df["key"]) == ["O-0"]
+
+
 def _finished_after(days: int) -> Issue:
     start = datetime(2024, 1, 1, tzinfo=UTC)
     return Issue(

@@ -322,7 +322,7 @@ def aging_wip(issues: Sequence[Issue], now: datetime | None = None) -> pd.DataFr
         if issue.was_done:
             for status, td in issue.statuses_x_periods.items():
                 history[status].append(td.total_seconds() / ONE_DAY)
-        if not issue.is_open or issue.started_at is None:
+        if not issue.is_open or issue.started_at is None or issue.in_backlog:
             continue
         since = (
             issue.status_transitions[-1].at

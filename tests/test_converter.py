@@ -370,6 +370,32 @@ def test_converter_issue_closed_straight_from_backlog_has_no_cycle_time():
     assert issue.lead_time == timedelta(days=4)
 
 
+def test_converter_started_issue_sent_back_to_the_backlog_is_in_the_backlog():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "Awaiting Test Case"),
+            ("2024-01-04", "Awaiting Test Case", "Open"),
+        ),
+    )
+    assert issue.started_at == datetime(2024, 1, 2, tzinfo=UTC)
+    assert issue.in_backlog
+    started = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(("2024-01-02", "Open", "In Progress")),
+    )
+    assert not started.in_backlog
+
+
+def test_status_category_new_puts_the_current_status_in_the_backlog():
+    raw = _issue_through_ids(
+        ("2024-01-02", "New", "Waiting for review"),
+        ("2024-01-05", "Waiting for review", "Planning"),
+        current="Planning",
+    )
+    assert JiraDataConverter().convert_data_to_issue(raw, CATEGORIES).in_backlog
+    # without categories Planning is an unknown name, so it counts as started
+    assert not JiraDataConverter().convert_data_to_issue(raw).in_backlog
+
+
 def test_converter_accepts_custom_backlog_statuses():
     data_item = _issue_moving_through(
         ("2024-01-02", "Open", "Ready"),

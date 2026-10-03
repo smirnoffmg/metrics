@@ -62,15 +62,20 @@ class JiraDataConverter:
         )
         self._credit_trailing_period(data_item, changelog_data)
         self._discard_by_resolution(data_item, changelog_data)
+        status = data_item["fields"]["status"]
         return Issue(
             key=data_item["key"],
-            status=data_item["fields"]["status"]["name"],
+            status=status["name"],
             created_at=issue_created_at,
             doers_x_periods=changelog_data["doers_x_periods"],
             statuses_x_periods=changelog_data["statuses_x_periods"],
             started_at=changelog_data["started_at"],
             last_finish_status_at=changelog_data["last_finish_status_at"],
             discarded=changelog_data["discarded"],
+            in_backlog=self._is_backlog(
+                status["name"].lower(),
+                (status_categories or {}).get(status.get("id") or ""),
+            ),
             status_history=changelog_data["status_history"],
             status_transitions=changelog_data["status_transitions"],
             handoffs=changelog_data["handoffs"],
