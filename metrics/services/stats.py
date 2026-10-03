@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from statistics import fmean, median
 from typing import TYPE_CHECKING, Any, Literal
 
+from scipy import stats
+
 from .backtest import (
     MIN_INDEPENDENT_OUTCOMES,
     SIGNIFICANCE,
@@ -201,7 +203,7 @@ def backtest_tile(summary: BacktestSummary | None) -> Tile:
     value = f"{summary.held_independent} of {summary.independent}"
     if summary.independent < MIN_INDEPENDENT_OUTCOMES:
         return Tile(label, value, f"only {summary.independent} independent outcomes")
-    held = summary.held_independent / summary.independent >= CLAIMED_CHANCE
+    held = _held_as_promised(summary.held_independent, summary.independent)
     return Tile(
         label,
         value,
@@ -217,7 +219,13 @@ def trust(summary: BacktestSummary | None) -> Trust:
     held, of = summary.held_independent, summary.independent
     if of < MIN_INDEPENDENT_OUTCOMES:
         return Trust("unchecked", held, of)
-    return Trust("holds" if held / of >= CLAIMED_CHANCE else "optimistic", held, of)
+    return Trust("holds" if _held_as_promised(held, of) else "optimistic", held, of)
+
+
+def _held_as_promised(held: int, of: int) -> bool:
+    # an honest 85% promise scores 9 or fewer of 11 about half the time, so only
+    # a share too low to be chance shows the forecast is optimistic
+    return bool(stats.binom.cdf(held, of, CLAIMED_CHANCE) >= SIGNIFICANCE)
 
 
 def forecast_verdict(  # noqa: PLR0913
@@ -275,7 +283,8 @@ def _trust_sentence(trust: Trust, horizon: int) -> str:
     if trust.word == "holds":
         return (
             f"Past {horizon}-week promises like this one"
-            f" held {trust.held} of {trust.of} times."
+            f" held {trust.held} of {trust.of} times,"
+            " in line with the 85% promised."
         )
     if trust.word == "optimistic":
         return (

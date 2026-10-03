@@ -19,13 +19,13 @@ The promise counts only issues open today. New work keeps arriving and takes its
 
 **2. Can I trust that number?**
 
-> Past 8-week promises like this one held only 9 of 11 times, fewer than the 85% promised.
+> Past 8-week promises like this one held 9 of 11 times, in line with the 85% promised.
 >
-> Treat the number as optimistic and commit to fewer, but don't promise a date for all of it; scope a release with --forecast-jql.
+> Commit to the number, but don't promise a date for all of it; scope a release with --forecast-jql.
 >
 > *- Hibernate*
 
-The same forecast is replayed from every past Monday, from only what Jira showed that day, and checked against what happened next. "9 of 11" counts promises whose outcomes don't overlap, so each one is real evidence. When the promises held as often as promised, the report says to commit to the number.
+The same forecast is replayed from every past Monday, from only what Jira showed that day, and checked against what happened next. "9 of 11" counts promises whose outcomes don't overlap, so each one is real evidence. An honest 85% promise still misses now and then, so 9 of 11 is judged against chance, not against a fixed 85% cutoff: only a count so low that an honest 85% promise would score it or fewer under 5% of the time (one-sided binomial test) makes the report call the number optimistic and say to commit to fewer. Otherwise it says to commit to the number.
 
 **3. Will the open list ever clear?**
 

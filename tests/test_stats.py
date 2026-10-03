@@ -209,9 +209,9 @@ def _summary(held_independent: int, independent: int) -> BacktestSummary:
 
 
 def test_backtest_tile_reads_natural_frequency():
-    assert backtest_tile(_summary(10, independent=12)) == Tile(
+    assert backtest_tile(_summary(4, independent=23)) == Tile(
         "past 8-week promises held",
-        "10 of 12",
+        "4 of 23",
         "fewer than promised",
         delta_good=False,
     )
@@ -393,9 +393,35 @@ def _dated_forecast(**changes) -> dict:
 
 def test_trust_reads_held_of_independent_promises():
     assert trust(_summary(11, independent=12)) == Trust("holds", 11, 12)
-    assert trust(_summary(9, independent=12)) == Trust("optimistic", 9, 12)
+    assert trust(_summary(4, independent=23)) == Trust("optimistic", 4, 23)
     assert trust(_summary(3, independent=3)) == Trust("unchecked", 3, 3)
     assert trust(None) == Trust("unchecked", 0, 0)
+
+
+def test_trust_calls_optimistic_only_beyond_chance():
+    # an honest 85% promise lands 9 or fewer of 11 about half the time
+    assert trust(_summary(9, independent=11)) == Trust("holds", 9, 11)
+    # P(X <= 17 | 23, 0.85) is about 0.12, still within chance
+    assert trust(_summary(17, independent=23)) == Trust("holds", 17, 23)
+    # P(X <= 16 | 23, 0.85) is about 0.046, just past chance
+    assert trust(_summary(16, independent=23)) == Trust("optimistic", 16, 23)
+    assert trust(_summary(14, independent=23)) == Trust("optimistic", 14, 23)
+
+
+def test_backtest_tile_calls_short_of_85_within_chance_as_promised():
+    tile = backtest_tile(_summary(9, independent=11))
+    assert tile.delta_text == "as promised"
+    assert tile.delta_good is True
+
+
+def test_forecast_verdict_says_a_share_below_85_held_within_chance():
+    verdict = forecast_verdict(
+        _open_work(), _dated_forecast(), Trust("holds", 9, 11), None, None
+    )
+    assert verdict[1] == (
+        "Past 8-week promises like this one held 9 of 11 times,"
+        " in line with the 85% promised."
+    )
 
 
 def test_forecast_verdict_says_commit_when_held_as_promised():
