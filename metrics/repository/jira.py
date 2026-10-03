@@ -123,6 +123,18 @@ class JiraIssuesRepository(BaseIssuesRepository):
             if (rewound := rewind_issue(item, at)) is not None
         ]
 
+    def forecast_issues_at(self, at: datetime) -> list[Issue]:
+        """Convert the forecast query's issues as Jira showed them at an earlier moment.
+
+        Membership is today's: the fields a query names, such as fixVersion,
+        are not rewound.
+        """
+        return [
+            self._convert(rewound)
+            for item in self.snapshot.forecast_issues
+            if (rewound := rewind_issue(item, at)) is not None
+        ]
+
     def _convert(self, data_item: dict) -> Issue:
         return self.converter.convert_data_to_issue(data_item, self.categories)
 

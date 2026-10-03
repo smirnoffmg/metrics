@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import cache, partial
 from statistics import fmean
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import numpy as np
 from scipy import stats
@@ -110,6 +110,21 @@ class DateSummary:
     held: int
     judged: int
     not_due: int
+
+
+@dataclass(frozen=True)
+class ScopeResult:
+    """A forecast query's forecast and, when paced by its own finishes, its replay.
+
+    basis is "assumed" when the scope is paced by a share of the team's
+    throughput, which nothing replays: runs and open_work are empty then.
+    """
+
+    forecast: dict[str, Any]
+    open_work: dict[str, Any]
+    runs: dict[int, list[Backtest]]
+    dates: DateSummary | None
+    basis: Literal["measured", "assumed"]
 
 
 @dataclass(frozen=True)

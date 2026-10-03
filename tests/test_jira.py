@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 from metrics.repository.converter import JiraDataConverter
 from metrics.repository.jira import JiraAPIRepository, JiraIssuesRepository
 from metrics.repository.snapshot import Snapshot
+from metrics.services.backtest import moment_of
 from tests.fakes import FakeCloudJira, FakeJira, FakeStatus, make_raw_issue
 
 
@@ -145,3 +146,62 @@ def test_jiraissuesrepository_issues_at_an_earlier_moment():
     repo.all()
     assert [i.key for i in repo.issues_at(datetime(2024, 2, 1, tzinfo=UTC))] == ["X-1"]
     api.get_snapshot.assert_called_once()
+
+
+def _done_on(key: str, day: str, created: str = "2024-01-01") -> dict:
+    return {
+        "key": key,
+        "fields": {
+            "created": f"{created}T00:00:00.000+0000",
+            "status": {"name": "Done"},
+            "resolution": {"name": "Fixed"},
+        },
+        "changelog": {
+            "histories": [
+                {
+                    "created": f"{day}T00:00:00.000+0000",
+                    "items": [
+                        {
+                            "field": "status",
+                            "from": "1",
+                            "fromString": "Open",
+                            "to": "6",
+                            "toString": "Done",
+                        },
+                    ],
+                },
+            ],
+        },
+    }
+
+
+def _scope_repo(team: list[dict], scope: list[dict]) -> JiraIssuesRepository:
+    api = MagicMock()
+    api.get_snapshot.return_value = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2024, 4, 1, tzinfo=UTC),
+        issues=team,
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=scope,
+    )
+    repo = JiraIssuesRepository(api, JiraDataConverter())
+    repo.all()
+    return repo
+
+
+def test_forecast_issues_at_rewinds_scope_status():
+    later = _done_on("S-2", "2024-03-10", created="2024-03-01")
+    repo = _scope_repo([], [_done_on("S-1", "2024-03-01"), later])
+    then = repo.forecast_issues_at(datetime(2024, 2, 1, tzinfo=UTC))
+    assert [issue.key for issue in then] == ["S-1"]
+    assert then[0].is_open
+    assert all(issue.was_done for issue in repo.forecast_issues())
+
+
+def test_scope_backtest_counts_only_scope_issues_open_at_origin():
+    team_only = _done_on("X-1", "2024-03-01")
+    in_scope = _done_on("S-1", "2024-03-05")
+    repo = _scope_repo([team_only, in_scope], [in_scope])
+    at = datetime(2024, 2, 5, tzinfo=UTC)
+    assert moment_of(repo.forecast_issues_at(at), at).open_keys == {"S-1"}

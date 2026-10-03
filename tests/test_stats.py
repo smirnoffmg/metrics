@@ -124,7 +124,7 @@ def test_build_stuck_rows_empty():
 
 def test_build_headline_tiles_puts_the_scope_after_the_date():
     scope = scope_forecast_tile(
-        {"p85": 3.0, "p85_date": date(2024, 2, 1)}, open_count=4
+        {"p85": 3.0, "p85_date": date(2024, 2, 1)}, open_count=4, total=6
     )
     tiles = build_headline_tiles(
         scatter=_scatter_df(),
@@ -135,14 +135,23 @@ def test_build_headline_tiles_puts_the_scope_after_the_date():
         flow_efficiency=0.0,
         scope_tile=scope,
     )
-    assert tiles[3] == Tile("85% of forecast scope done", "by 01 Feb 2024")
+    assert tiles[3] == Tile(
+        "all 6 issues of the scope done (85% chance)", "by 01 Feb 2024"
+    )
 
 
 def test_scope_forecast_tile_says_when_nothing_is_left():
-    assert scope_forecast_tile({}, open_count=0) == Tile(
-        "85% of forecast scope done", "all done"
+    assert scope_forecast_tile({}, open_count=0, total=2) == Tile(
+        "all 2 issues of the scope done (85% chance)", "all done"
     )
-    assert scope_forecast_tile({}, open_count=3).value == "n/a"
+    assert scope_forecast_tile({}, open_count=3, total=3).value == "n/a"
+
+
+def test_scope_forecast_tile_says_how_far_it_was_checked():
+    forecast = {"p85": 3.0, "p85_date": date(2024, 2, 1)}
+    tile = scope_forecast_tile(forecast, 4, 6, note="assumed, not checked")
+    assert tile.delta_text == "assumed, not checked"
+    assert tile.delta_good is None
 
 
 def test_build_headline_tiles_leave_out_the_scope_tile_without_a_scope():
@@ -154,7 +163,7 @@ def test_build_headline_tiles_leave_out_the_scope_tile_without_a_scope():
         throughput={"2024W01": 2},
         flow_efficiency=0.0,
     )
-    assert "85% of forecast scope done" not in [tile.label for tile in tiles]
+    assert not any("of the scope" in tile.label for tile in tiles)
 
 
 def test_build_delivery_tiles():

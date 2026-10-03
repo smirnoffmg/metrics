@@ -278,9 +278,101 @@ def test_cli_forecasts_the_scope_saved_in_a_snapshot():
         assert result.exit_code == 0, result.output
         report = Path("output/report.html").read_text()
     assert "fixVersion = 7.2: 2 of 3 issues open" in result.output
-    assert "50% of throughput" in result.output
-    assert "85% of forecast scope done" in report
+    assert "50% of team throughput, assumed, not checked" in result.output
+    assert "all 3 issues of the scope done (85% chance)" in report
     assert "fixVersion = 7.2" in report
+
+
+def _release_and_team_issues():
+    """A release finishing one issue a week, ten left; the team finishes ten a week."""
+    scope, team = [], []
+    for week in range(32):
+        tuesday = date(2026, 2, 3) + timedelta(weeks=week)
+        scope.append(
+            _raw_issue(
+                f"S-{week}",
+                "Done",
+                (str(tuesday), "Open", "Done"),
+                resolution="Fixed",
+            ),
+        )
+        for n in range(9):
+            raw = _raw_issue(
+                f"T-{week}-{n}",
+                "Done",
+                (str(tuesday + timedelta(days=1)), "Open", "Done"),
+                resolution="Fixed",
+            )
+            raw["fields"]["created"] = f"{tuesday}T00:00:00.000+0000"
+            team.append(raw)
+    scope += [_raw_issue(f"S-open-{n}", "Open") for n in range(10)]
+    for raw in scope:
+        raw["fields"]["created"] = "2026-02-02T00:00:00.000+0000"
+    return scope, team + scope
+
+
+def _run_release(*args):
+    scope, issues = _release_and_team_issues()
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=issues,
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=scope,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json", *args])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    return result.output, report
+
+
+def test_scope_forecast_uses_scope_throughput_when_history_suffices():
+    output, report = _run_release()
+    # at all of the team's ten a week, all ten would be promised
+    assert "Scope: at least 8 of 10 open issues done in 8 weeks (85%)" in output
+    assert "from the scope's own finishes" in output
+    assert "Scope backtest: held " in output
+    assert "<td>scope: open work</td>" in report
+    assert "all 42 issues of the scope done (85% chance)" in report
+
+
+def test_forecast_focus_given_overrides_measured_scope():
+    output, _ = _run_release("--forecast-focus", "0.5")
+    assert "50% of team throughput, assumed, not checked" in output
+    assert "Scope: at least" not in output
+    assert "Scope backtest" not in output
+
+
+def test_scope_without_history_says_not_checked():
+    scope = [
+        _raw_issue("X-99", "In Progress", ("2026-09-01", "Open", "In Progress")),
+        _raw_issue(
+            "X-3",
+            "Done",
+            ("2026-06-02", "Open", "In Progress"),
+            ("2026-08-13", "In Progress", "Done"),
+            resolution="Fixed",
+        ),
+    ]
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=_finished_and_open_issues(),
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=scope,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+    assert "at team throughput, not checked" in result.output
+    assert "Scope backtest" not in result.output
 
 
 def test_cli_reports_a_list_that_does_not_clear_within_two_years():

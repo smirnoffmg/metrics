@@ -169,12 +169,19 @@ def flow_tile(flow: BacklogFlow | None) -> Tile:
     )
 
 
-def scope_forecast_tile(forecast: dict[str, Any], open_count: int) -> Tile:
-    """Headline tile for the forecast query's issues."""
-    label = "85% of forecast scope done"
+def scope_forecast_tile(
+    forecast: dict[str, Any],
+    open_count: int,
+    total: int,
+    *,
+    note: str | None = None,
+) -> Tile:
+    """Headline tile for the forecast query's issues; note says what it rests on."""
+    label = f"all {total} issues of the scope done (85% chance)"
     if open_count == 0:
         return Tile(label, "all done")
-    return _forecast_tile(forecast, label)
+    tile = _forecast_tile(forecast, label)
+    return Tile(tile.label, tile.value, note)
 
 
 def backtest_tile(summary: BacktestSummary | None) -> Tile:
