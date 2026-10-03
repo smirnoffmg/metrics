@@ -698,6 +698,29 @@ def test_cli_notes_no_share_for_a_forecast_it_does_not_make():
     assert "not measured" not in result.output
 
 
+def test_report_method_says_when_the_share_of_finishes_was_assumed():
+    history = _short_history_with_a_cut_first_week()
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=history,
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=history,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    method = report[report.index("<details") :]
+    for subject in ("open issues", "its open issues"):
+        note = f"share of finishes going to {subject} not measured"
+        assert note in result.output
+        assert note in method
+
+
 def test_cli_refuses_a_forecast_query_the_snapshot_was_not_saved_with():
     snapshot = Snapshot(
         server="https://jira.example",

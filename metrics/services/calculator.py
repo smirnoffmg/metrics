@@ -293,8 +293,6 @@ def monte_carlo_forecast(  # noqa: PLR0913
             "focus": focus,
             "pace": pace,
             "max_weeks": max_weeks,
-            "cleared": float(np.mean(weeks <= max_weeks)),
-            "share": float(np.median(shares)),
             "done_p50": np.percentile(done, 50, axis=0),
             "done_at_least_85": np.percentile(done, 15, axis=0, method="lower"),
         },

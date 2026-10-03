@@ -581,28 +581,31 @@ def test_forecast_open_work_is_the_backtested_predictor():
         40, history, [0.3, 0.6], 4, np.random.default_rng(5), pace=pace
     )
     assert fc["at_least_85"] == np.percentile(totals, 15, method="lower")
-    assert fc["p50"] == np.percentile(totals, 50)
     assert fc["horizon"] == 4  # noqa: PLR2004
     assert fc["n_open"] == 40  # noqa: PLR2004
     assert fc["by_date"] == date(2024, 4, 3)
-    assert fc["share"] == pytest.approx(0.45)
     assert fc["recalibrated"] is False
 
 
 def test_forecast_open_work_recalibrates_by_past_errors():
+    history = [3, 9, 4, 12, 6, 8, 5, 11]
+    pace = Pace(window=6)
     fc = forecast_open_work(
         40,
-        [3, 9, 4, 12, 6, 8, 5, 11],
+        history,
         [0.5],
         horizon=4,
-        pace=Pace(window=6),
+        pace=pace,
         # every past outcome fell below every simulation: promise the fewest
         past_us=[0.0] * 12,
         now=datetime(2024, 3, 6, tzinfo=UTC),
         seed=5,
     )
+    totals = open_work_totals(
+        40, history, [0.5], 4, np.random.default_rng(5), pace=pace
+    )
     assert fc["recalibrated"] is True
-    assert fc["p50"] == fc["at_least_85"]
+    assert fc["at_least_85"] == totals.min()
 
 
 def _half_new_work_world(weeks: int, seed: int) -> list[tuple[str, int, int | None]]:

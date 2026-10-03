@@ -536,8 +536,6 @@ def test_monte_carlo_forecast_full_share_clears_like_before():
         now=datetime(2026, 7, 15, tzinfo=UTC),
     )
     assert result["p85"] == 4.0  # noqa: PLR2004
-    assert result["cleared"] == 1.0
-    assert result["share"] == 1.0
     assert result["done_p50"][:4].tolist() == [5, 10, 15, 20]
     assert result["done_at_least_85"][3] == 20  # noqa: PLR2004
 
@@ -553,7 +551,6 @@ def test_monte_carlo_forecast_with_shares_takes_longer():
         shares=(0.5,),
     )
     assert result["p85"] == 8.0  # noqa: PLR2004
-    assert result["share"] == 0.5  # noqa: PLR2004
 
 
 def test_monte_carlo_forecast_reports_no_date_when_list_does_not_clear_within_cap():
@@ -569,7 +566,6 @@ def test_monte_carlo_forecast_reports_no_date_when_list_does_not_clear_within_ca
     )
     assert result["p85"] is None
     assert result["p85_date"] is None
-    assert result["cleared"] < 0.85  # noqa: PLR2004
     assert len(result["done_p50"]) == 10  # noqa: PLR2004
 
 

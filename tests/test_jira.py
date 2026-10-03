@@ -199,7 +199,7 @@ def test_forecast_issues_at_rewinds_scope_status():
     assert all(issue.was_done for issue in repo.forecast_issues())
 
 
-def test_scope_backtest_counts_only_scope_issues_open_at_origin():
+def test_scope_moment_opens_only_the_scope_issues_open_then():
     team_only = _done_on("X-1", "2024-03-01")
     in_scope = _done_on("S-1", "2024-03-05")
     repo = _scope_repo([team_only, in_scope], [in_scope])

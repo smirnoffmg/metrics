@@ -410,6 +410,16 @@ def date_check_note(summary: DateSummary) -> str:
     return "Clear dates: too little history to replay past promises."
 
 
+def unmeasured_share_note(open_work: dict[str, Any], subject: str) -> str | None:
+    """Say the forecast assumed all finishes go to the open issues, if it did."""
+    if not open_work or open_work.get("share_measured", True):
+        return None
+    return (
+        f"share of finishes going to {subject} not measured"
+        f" (too few past {open_work['horizon']}-week windows); assuming all of them"
+    )
+
+
 def _horizons(summaries: Sequence[BacktestSummary]) -> str:
     weeks = [str(s.horizon) for s in sorted(summaries, key=lambda s: s.horizon)]
     listed = weeks[0] if len(weeks) == 1 else f"{', '.join(weeks[:-1])} or {weeks[-1]}"

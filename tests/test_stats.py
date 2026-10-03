@@ -26,6 +26,7 @@ from metrics.services.stats import (
     scope_forecast_tile,
     scope_verdict,
     trust,
+    unmeasured_share_note,
 )
 
 
@@ -59,10 +60,8 @@ def _open_work(**changes) -> dict:
     return {
         "horizon": 8,
         "n_open": 151,
-        "p50": 40.0,
         "at_least_85": 31.0,
         "by_date": date(2024, 3, 1),
-        "share": 0.4,
         "recalibrated": False,
         **changes,
     }
@@ -387,6 +386,16 @@ def test_date_check_note_reads_held_of_judged():
 def test_date_check_note_without_promises():
     note = date_check_note(DateSummary(held=0, judged=0, not_due=0))
     assert note == "Clear dates: too little history to replay past promises."
+
+
+def test_unmeasured_share_note_only_when_the_share_was_assumed():
+    assumed = _open_work(share_measured=False)
+    assert unmeasured_share_note(assumed, "its open issues") == (
+        "share of finishes going to its open issues not measured"
+        " (too few past 8-week windows); assuming all of them"
+    )
+    assert unmeasured_share_note(_open_work(share_measured=True), "open issues") is None
+    assert unmeasured_share_note({}, "open issues") is None
 
 
 def _dated_forecast(**changes) -> dict:

@@ -257,10 +257,8 @@ def forecast_open_work(  # noqa: PLR0913
     return {
         "horizon": horizon,
         "n_open": n_open,
-        "p50": float(np.percentile(totals, 50)),
         "at_least_85": float(np.percentile(totals, 15, method="lower")),
         "by_date": (now + timedelta(weeks=horizon)).date(),
-        "share": float(np.median(shares)),
         "recalibrated": past_us is not None,
     }
 

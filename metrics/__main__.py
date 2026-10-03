@@ -123,6 +123,7 @@ from metrics.services.stats import (
     scope_forecast_tile,
     scope_verdict,
     trust,
+    unmeasured_share_note,
 )
 
 try:
@@ -693,6 +694,7 @@ def calculate_metrics(  # noqa: PLR0913
 
     scope_tile = None
     release: list[str] = []
+    scope_open_work: dict[str, Any] = {}
     if repo.snapshot.forecast_jql:
         scope = repo.forecast_issues()
         scope_moment_at = cache(lambda at: moment_of(repo.forecast_issues_at(at), at))
@@ -706,6 +708,7 @@ def calculate_metrics(  # noqa: PLR0913
             forecast_focus,
         )
         scope_forecast = scoped.forecast
+        scope_open_work = scoped.open_work
         scope_tile = scope_forecast_tile(
             scope_forecast,
             sum(1 for issue in scope if issue.is_open),
@@ -778,11 +781,6 @@ def calculate_metrics(  # noqa: PLR0913
             output_dir,
         )
 
-    method_note = " ".join(
-        part
-        for part in (backtest_note, date_check_note(dates) if dates else None)
-        if part
-    )
     report_path = output_dir / "report.html"
     report_service.render(
         str(report_path),
@@ -793,13 +791,31 @@ def calculate_metrics(  # noqa: PLR0913
         agent_comparison=comparison,
         backtests=backtests,
         used_model=used_model,
-        backtest_note=method_note or None,
+        backtest_note=_method_note(backtest_note, dates, open_work, scope_open_work),
         verdict=verdict,
         method_images=[backtest_chart] if backtest_chart else [],
         delivery_tiles=delivery_tiles,
         delivery_images=delivery_charts,
     )
     click.echo(f"Report: {report_path}")
+
+
+def _method_note(
+    backtest_note: str | None,
+    dates: DateSummary | None,
+    open_work: dict[str, Any],
+    scope_open_work: dict[str, Any],
+) -> str | None:
+    share_notes = (
+        ("Forecast", unmeasured_share_note(open_work, "open issues")),
+        ("Scope", unmeasured_share_note(scope_open_work, "its open issues")),
+    )
+    parts = (
+        backtest_note,
+        date_check_note(dates) if dates else None,
+        *(f"{label}: {note}." for label, note in share_notes if note),
+    )
+    return " ".join(part for part in parts if part) or None
 
 
 def _forecast(
@@ -847,21 +863,21 @@ def _forecast(
     )
     if not forecast:
         return pace, forecast, {}, None, None
-    if not measured:
-        click.echo(
-            "Forecast: share of finishes going to open issues not measured"
-            f" (too few past {horizon}-week windows); assuming all of them",
-        )
-    open_work = forecast_open_work(
-        forecast["backlog"],
-        list(history.values()),
-        shares,
-        horizon=horizon,
-        pace=pace,
-        past_us=past_us,
-        now=now,
-        seed=BACKTEST_SEED,
-    )
+    open_work = {
+        **forecast_open_work(
+            forecast["backlog"],
+            list(history.values()),
+            shares,
+            horizon=horizon,
+            pace=pace,
+            past_us=past_us,
+            now=now,
+            seed=BACKTEST_SEED,
+        ),
+        "share_measured": measured,
+    }
+    if note := unmeasured_share_note(open_work, "open issues"):
+        click.echo(f"Forecast: {note}")
     click.echo(
         f"Forecast: at least {open_work['at_least_85']:.0f}"
         f" of {open_work['n_open']} open issues done in {horizon} weeks (85%)",
@@ -1176,11 +1192,8 @@ def _measured_scope(
     judged = judged_summary(list(summaries.values()))
     horizon = judged.horizon if judged is not None else SHORT_HORIZONS_WEEKS[0]
     shares = past_shares(moment_at, weeks, until=len(weeks), horizon=horizon)
-    if len(shares) < MIN_SHARE_WINDOWS:
-        click.echo(
-            "Scope: share of finishes going to its open issues not measured"
-            f" (too few past {horizon}-week windows); assuming all of them",
-        )
+    measured = len(shares) >= MIN_SHARE_WINDOWS
+    if not measured:
         shares = [1.0]
     # the first week starts at the scope's first finish, so it is only partly counted
     history = dict(list(throughput.items())[1:])
@@ -1196,16 +1209,21 @@ def _measured_scope(
     )
     if not forecast:
         return ScopeResult(forecast, {}, runs, None, "measured")
-    open_work = forecast_open_work(
-        forecast["backlog"],
-        list(history.values()),
-        shares,
-        horizon=horizon,
-        pace=pace,
-        past_us=None,
-        now=now,
-        seed=BACKTEST_SEED,
-    )
+    open_work = {
+        **forecast_open_work(
+            forecast["backlog"],
+            list(history.values()),
+            shares,
+            horizon=horizon,
+            pace=pace,
+            past_us=None,
+            now=now,
+            seed=BACKTEST_SEED,
+        ),
+        "share_measured": measured,
+    }
+    if note := unmeasured_share_note(open_work, "its open issues"):
+        click.echo(f"Scope: {note}")
     click.echo(
         f"Scope: at least {open_work['at_least_85']:.0f}"
         f" of {open_work['n_open']} open issues done in {horizon} weeks (85%)",
