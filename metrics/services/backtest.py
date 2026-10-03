@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import cache, partial
 from statistics import fmean
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import numpy as np
 from scipy import stats
@@ -186,6 +186,43 @@ def open_work_totals(  # noqa: PLR0913
         simulations=simulations,
     )
     return done[:, horizon - 1]
+
+
+def forecast_open_work(  # noqa: PLR0913
+    n_open: int,
+    history: Sequence[int],
+    shares: Sequence[float],
+    *,
+    horizon: int,
+    pace: Pace,
+    past_us: Sequence[float] | None,
+    now: datetime,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """How many of the open issues get done over the horizon, as the backtest replays.
+
+    past_us, raw u values of past open-work forecasts over the same horizon,
+    recalibrate it when given.
+    """
+    totals = open_work_totals(
+        n_open,
+        history,
+        shares,
+        horizon,
+        np.random.default_rng(seed),
+        pace=pace,
+    )
+    if past_us is not None:
+        totals = recalibrate(totals, past_us)
+    return {
+        "horizon": horizon,
+        "n_open": n_open,
+        "p50": float(np.percentile(totals, 50)),
+        "at_least_85": float(np.percentile(totals, 15, method="lower")),
+        "by_date": (now + timedelta(weeks=horizon)).date(),
+        "share": float(np.median(shares)),
+        "recalibrated": past_us is not None,
+    }
 
 
 def recalibrate(totals: np.ndarray, past_us: Sequence[float]) -> np.ndarray:

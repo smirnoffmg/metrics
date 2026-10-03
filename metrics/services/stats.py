@@ -19,8 +19,12 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from .backtest import BacktestSummary
+    from .calculator import BacklogFlow
 
 CLAIMED_CHANCE = 0.85
+# A week's arrivals and finishes vary by several issues, so a smaller gap
+# between their averages is not evidence that either side is ahead.
+FLOW_NOISE = 0.1
 
 
 @dataclass(frozen=True)
@@ -71,8 +75,6 @@ def _split_halves(scatter: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 def _forecast_tile(forecast: dict[str, Any], label: str) -> Tile:
     if not forecast:
         return Tile(label, "n/a")
-    if forecast.get("recalibrated"):
-        label = f"{label}, recalibrated"
     if forecast["p85_date"] is None:
         return Tile(label, "not within 2 years")
     return Tile(label, f"by {forecast['p85_date']:%d %b %Y}")
@@ -99,24 +101,72 @@ def _throughput_tile(throughput: dict[str, int]) -> Tile:
 def build_headline_tiles(  # noqa: PLR0913
     scatter: pd.DataFrame,
     aging: pd.DataFrame,
+    open_work: dict[str, Any],
     forecast: dict[str, Any],
     throughput: dict[str, int],
     flow_efficiency: float,
-    scope_tile: Tile | None = None,
+    *,
     backtest: Tile | None = None,
+    scope_tile: Tile | None = None,
+    flow: BacklogFlow | None = None,
 ) -> list[Tile]:
     """Build the report hero row; scope_tile is None without a forecast query."""
-    tiles = [
+    n_open = open_work.get("n_open", forecast.get("backlog", 0))
+    return [
+        open_work_tile(open_work),
+        backtest if backtest is not None else backtest_tile(None),
+        clear_date_tile(forecast, n_open),
+        *([scope_tile] if scope_tile is not None else []),
+        flow_tile(flow),
         _cycle_tile(scatter),
-        _forecast_tile(forecast, "85% of backlog done"),
-        *([backtest] if backtest is not None else []),
         Tile("Work in progress", str(len(aging))),
         _throughput_tile(throughput),
         Tile("Flow efficiency", f"{flow_efficiency:.0%}"),
     ]
-    if scope_tile is not None:
-        tiles.insert(2, scope_tile)
-    return tiles
+
+
+def open_work_tile(open_work: dict[str, Any]) -> Tile:
+    """How many of the open issues get done over the backtested horizon."""
+    if not open_work:
+        return Tile("open issues done (85% chance)", "n/a")
+    label = (
+        f"of {open_work['n_open']} open issues done"
+        f" in {open_work['horizon']} weeks (85% chance)"
+    )
+    if open_work["recalibrated"]:
+        label = f"{label}, recalibrated"
+    return Tile(label, f"≥ {open_work['at_least_85']:.0f}")
+
+
+def clear_date_tile(forecast: dict[str, Any], n_open: int) -> Tile:
+    """When every issue open now is done, which may be beyond the simulated years."""
+    label = (
+        f"all {n_open} open issues done (85% chance)"
+        if n_open
+        else "all open issues done (85% chance)"
+    )
+    return _forecast_tile(forecast, label)
+
+
+def flow_tile(flow: BacklogFlow | None) -> Tile:
+    """Issues arriving against issues finished a week.
+
+    It says nothing of the open list's direction: discarded issues leave it too,
+    and they are not among the finishes.
+    """
+    label = "Arrivals and finishes"
+    if flow is None:
+        return Tile(label, "n/a")
+    value = f"{flow.arrived:.1f} in / {flow.finished:.1f} done per week"
+    if abs(flow.net) < FLOW_NOISE * flow.finished:
+        return Tile(label, value)
+    behind = flow.net > 0
+    return Tile(
+        label,
+        value,
+        "more arrive than get done" if behind else "more get done than arrive",
+        not behind,
+    )
 
 
 def scope_forecast_tile(forecast: dict[str, Any], open_count: int) -> Tile:
@@ -128,22 +178,19 @@ def scope_forecast_tile(forecast: dict[str, Any], open_count: int) -> Tile:
 
 
 def backtest_tile(summary: BacktestSummary | None) -> Tile:
-    """How often past 85% forecasts over the horizon came true."""
+    """How many past promises over the horizon came true, of those not overlapping."""
     if summary is None:
-        return Tile("85% forecasts held", "n/a")
-    held = summary.held_85
-    label = f"of {summary.count} past {summary.horizon}-week 85% forecasts held"
+        return Tile("past promises held", "n/a")
+    label = f"past {summary.horizon}-week promises held"
+    value = f"{summary.held_independent} of {summary.independent}"
     if summary.independent < MIN_INDEPENDENT_OUTCOMES:
-        return Tile(
-            label,
-            f"{held:.0%}",
-            f"only {summary.independent} independent outcomes",
-        )
+        return Tile(label, value, f"only {summary.independent} independent outcomes")
+    held = summary.held_independent / summary.independent >= CLAIMED_CHANCE
     return Tile(
         label,
-        f"{held:.0%}",
-        "as promised" if held >= CLAIMED_CHANCE else "fewer than promised",
-        held >= CLAIMED_CHANCE,
+        value,
+        "as promised" if held else "fewer than promised",
+        held,
     )
 
 

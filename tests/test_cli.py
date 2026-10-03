@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -304,6 +304,72 @@ def test_cli_reports_a_list_that_does_not_clear_within_two_years():
         report = Path("output/report.html").read_text()
     assert "not within 2 years" in result.output
     assert "not within 2 years" in report
+
+
+def _late_arrivals_first_issues():
+    """Each week three arrive: one done that week, one the next, one never."""
+    issues = []
+    for week in range(32):
+        tuesday = date(2026, 2, 3) + timedelta(weeks=week)
+        for name, done_after in (("A", 9), ("B", 2), (None, None)):
+            key = f"{name or 'C'}-{week}"
+            if done_after is None:
+                raw = _raw_issue(key, "Open")
+            else:
+                raw = _raw_issue(
+                    key,
+                    "Done",
+                    (str(tuesday + timedelta(days=done_after)), "Open", "Done"),
+                    resolution="Fixed",
+                )
+            raw["fields"]["created"] = f"{tuesday}T00:00:00.000+0000"
+            issues.append(raw)
+    return issues
+
+
+def test_backtest_replays_issues_open_at_each_monday():
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=_late_arrivals_first_issues(),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    assert "Forecast: at least 1 of 32 open issues done in" in result.output
+    assert "of 32 open issues done in" in report
+    assert "Baseline (all throughput to open issues): held 0 of" in result.output
+    assert "85% of backlog done" not in report
+    assert "<td>throughput, last 12 weeks, pace used</td>" in report
+
+
+def test_cli_notes_no_share_for_a_forecast_it_does_not_make():
+    issues = [
+        _raw_issue(
+            f"X-{i}",
+            "Done",
+            ("2026-09-01", "Open", "In Progress"),
+            (f"2026-09-{2 + i:02d}", "In Progress", "Done"),
+            resolution="Fixed",
+        )
+        for i in range(3)
+    ] + [_raw_issue("X-99", "In Progress", ("2026-09-01", "Open", "In Progress"))]
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=issues,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+    assert "not measured" not in result.output
 
 
 def test_cli_refuses_a_forecast_query_the_snapshot_was_not_saved_with():

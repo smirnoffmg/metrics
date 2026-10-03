@@ -120,6 +120,40 @@ def weekly_arrivals(issues: Sequence[Issue], now: datetime) -> dict[str, int]:
     return weekly_counts([issue.created_at.date() for issue in issues], now)
 
 
+@dataclass(frozen=True)
+class BacklogFlow:
+    """Issues arriving and finished in a typical week, at the forecast's pace."""
+
+    arrived: float
+    finished: float
+
+    @property
+    def net(self) -> float:
+        """Arrivals beyond finishes a week; discards are in neither."""
+        return self.arrived - self.finished
+
+
+def backlog_flow(
+    issues: Sequence[Issue],
+    throughput: dict[str, int],
+    now: datetime,
+    pace: Pace,
+) -> BacklogFlow | None:
+    """Average weekly arrivals and finishes over the weeks the forecast draws from."""
+    if not throughput:
+        return None
+    arrivals = weekly_arrivals(issues, now)
+    return BacklogFlow(
+        arrived=_pace_mean([arrivals.get(week, 0) for week in throughput], pace),
+        finished=_pace_mean(list(throughput.values()), pace),
+    )
+
+
+def _pace_mean(weekly: Sequence[float], pace: Pace) -> float:
+    samples, chances = pace_draws(weekly, pace)
+    return float(np.average(samples, weights=chances))
+
+
 def weekly_counts(days: list[date], now: datetime | None = None) -> dict[str, int]:
     """Count days per finished ISO week, from the first up to the week before now."""
     now = now or datetime.now(tz=UTC)
@@ -259,27 +293,6 @@ def monte_carlo_forecast(  # noqa: PLR0913
             "done_p50": np.percentile(done, 50, axis=0),
             "done_at_least_85": np.percentile(done, 15, axis=0, method="lower"),
         },
-        now,
-    )
-
-
-def recalibrate_forecast(
-    forecast: dict[str, Any],
-    past_us: Sequence[float],
-    now: datetime,
-) -> dict[str, Any]:
-    """Correct weeks to clear the backlog by the u-plot G of past throughput forecasts.
-
-    Past u values rate throughput over a horizon, and the backlog is cleared by
-    week k exactly when throughput over k weeks reaches it, so
-    P*(W <= k) = 1 - G(1 - P(W <= k)); one horizon's G stands in for every k.
-    """
-    weeks = np.asarray(forecast["weeks"], dtype=float)
-    levels = (np.arange(len(weeks)) + 0.5) / len(weeks)
-    g_inverse = np.quantile(np.asarray(past_us, dtype=float), 1 - levels)
-    corrected = np.quantile(weeks, 1 - g_inverse)
-    return _with_percentiles(
-        {**forecast, "weeks": corrected, "recalibrated": True},
         now,
     )
 

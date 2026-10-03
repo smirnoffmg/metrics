@@ -97,6 +97,7 @@ def test_report_renders_the_backtest_by_pace_and_horizon(tmp_path):
             mean_crps=crps_mean,
             bias_p=0.0661,
             trend_p=None,
+            held_independent=22,
         )
 
     ReportService().render(
@@ -113,8 +114,8 @@ def test_report_renders_the_backtest_by_pace_and_horizon(tmp_path):
     html = out.read_text(encoding="utf-8")
     assert "Forecast backtest by model and horizon" in html
     assert (
-        "<tr><td>last 12 weeks</td><td>4 weeks</td><td>97</td><td>25</td><td>90%</td>"
-        "<td>0.16</td><td>61.3</td><td>0.066</td><td>n/a</td></tr>"
+        "<tr><td>last 12 weeks</td><td>4 weeks</td><td>97</td><td>22 of 25</td>"
+        "<td>90%</td><td>0.16</td><td>61.3</td><td>0.066</td><td>n/a</td></tr>"
     ) in html
     assert (
         "<tr><td><b>half-life 4 weeks, recalibrated, used</b></td><td>4 weeks</td>"

@@ -128,7 +128,7 @@ def _backtest_table_html(
 
     body = "".join(
         f"<tr><td>{model_cell(model)}</td><td>{s.horizon} weeks</td>"
-        f"<td>{s.count}</td><td>{s.independent}</td>"
+        f"<td>{s.count}</td><td>{s.held_independent} of {s.independent}</td>"
         f"<td>{s.held_85:.0%}</td><td>{s.kolmogorov:.2f}</td>"
         f"<td>{s.mean_crps:.1f}</td><td>{_p_value(s.bias_p)}</td>"
         f"<td>{_p_value(s.trend_p)}</td></tr>"
@@ -138,7 +138,7 @@ def _backtest_table_html(
     return (
         "<section><h2>Forecast backtest by model and horizon</h2>"
         "<table><tr><th>Model</th><th>Horizon</th><th>Past forecasts</th>"
-        "<th>Independent outcomes</th><th>85% forecasts held</th>"
+        "<th>Independent promises held</th><th>85% forecasts held</th>"
         "<th>Kolmogorov distance</th><th>Mean CRPS</th>"
         "<th>Bias p (u-plot)</th><th>Drift p (y-plot)</th></tr>"
         f"{body}</table>{f'<p>{note}</p>' if note else ''}</section>"

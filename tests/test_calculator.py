@@ -12,6 +12,7 @@ from metrics.entity.issues import Issue, StatusTransition
 from metrics.services.calculator import (
     Pace,
     aging_wip,
+    backlog_flow,
     burndown,
     cumulative_flow,
     cycle_time_points,
@@ -23,7 +24,6 @@ from metrics.services.calculator import (
     monte_carlo_forecast,
     pace_draws,
     queue_times,
-    recalibrate_forecast,
     returns_to_testing,
     weekly_arrivals,
     weekly_throughput,
@@ -468,37 +468,6 @@ def test_pace_labels():
     assert Pace(half_life=4).label == "half-life 4 weeks"
 
 
-def _spread_forecast() -> dict:
-    throughput = {f"2024W{w:02d}": 1 if w % 2 else 5 for w in range(1, 13)}
-    return monte_carlo_forecast(
-        _open_issues(30),
-        throughput,
-        simulations=2000,
-        seed=1,
-        now=datetime(2026, 7, 15, tzinfo=UTC),
-    )
-
-
-def test_recalibrated_forecast_with_every_past_outcome_at_the_median():
-    raw = _spread_forecast()
-    result = recalibrate_forecast(
-        raw, [0.5] * 20, now=datetime(2026, 7, 15, tzinfo=UTC)
-    )
-    assert result["p85"] == raw["p50"]
-    assert result["p95"] == raw["p50"]
-    assert result["recalibrated"] is True
-
-
-def test_recalibrated_forecast_after_optimistic_past_takes_longer():
-    raw = _spread_forecast()
-    # outcomes below every simulated throughput: the backlog takes the longest
-    result = recalibrate_forecast(
-        raw, [0.0] * 20, now=datetime(2026, 7, 15, tzinfo=UTC)
-    )
-    assert result["p50"] == float(raw["weeks"].max())
-    assert result["p50_date"] > raw["p85_date"]
-
-
 def test_burndown_never_exceeds_open_count_and_never_falls():
     done = burndown(
         10,
@@ -589,3 +558,39 @@ def test_weekly_arrivals_counts_created_per_week_excluding_current():
     issues = [created(1), created(3), created(16), created(17)]
     result = weekly_arrivals(issues, now=datetime(2024, 1, 17, tzinfo=UTC))
     assert result == {"2024W01": 2, "2024W02": 0}
+
+
+def test_backlog_flow_weighs_arrivals_and_finishes_by_pace():
+    def issue(key: str, created: int, finished: int | None = None) -> Issue:
+        # days of January 2024, which starts on a Monday
+        return Issue(
+            key=key,
+            status="Done" if finished else "New",
+            created_at=datetime(2024, 1, created, tzinfo=UTC),
+            last_finish_status_at=datetime(2024, 1, finished, tzinfo=UTC)
+            if finished
+            else None,
+        )
+
+    issues = [
+        *(issue(f"D-{n}", 2, 17) for n in range(2)),
+        *(issue(f"E-{n}", 2, 24) for n in range(4)),
+        issue("N-1", 16),
+        *(issue(f"N-{n}", 23) for n in range(2, 5)),
+    ]
+    now = datetime(2024, 1, 29, tzinfo=UTC)
+    flow = backlog_flow(
+        issues,
+        weekly_throughput(issues, now=now),
+        now,
+        Pace(half_life=1),
+    )
+    # the week before throughput starts is left out; the later week counts double
+    assert flow is not None
+    assert flow.arrived == pytest.approx(7 / 3)
+    assert flow.finished == pytest.approx(10 / 3)
+    assert flow.net == pytest.approx(-1.0)
+
+
+def test_backlog_flow_without_throughput():
+    assert backlog_flow([], {}, datetime(2024, 1, 29, tzinfo=UTC), Pace(12)) is None

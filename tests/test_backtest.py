@@ -20,6 +20,7 @@ from metrics.services.backtest import (
     bootstrap_totals,
     choose_pace,
     crps,
+    forecast_open_work,
     judged_summary,
     kolmogorov_distance,
     moment_of,
@@ -557,6 +558,47 @@ def test_open_work_totals_never_exceed_open_count():
     totals = open_work_totals(7, [10, 20, 30] * 4, [0.5, 1.0], 4, rng, pace=Pace(12))
     assert totals.max() == 7  # noqa: PLR2004
     assert totals.min() >= 0
+
+
+def test_forecast_open_work_is_the_backtested_predictor():
+    history = [3, 9, 4, 12, 6, 8, 5, 11]
+    pace = Pace(window=6)
+    fc = forecast_open_work(
+        40,
+        history,
+        [0.3, 0.6],
+        horizon=4,
+        pace=pace,
+        past_us=None,
+        now=datetime(2024, 3, 6, tzinfo=UTC),
+        seed=5,
+    )
+    totals = open_work_totals(
+        40, history, [0.3, 0.6], 4, np.random.default_rng(5), pace=pace
+    )
+    assert fc["at_least_85"] == np.percentile(totals, 15, method="lower")
+    assert fc["p50"] == np.percentile(totals, 50)
+    assert fc["horizon"] == 4  # noqa: PLR2004
+    assert fc["n_open"] == 40  # noqa: PLR2004
+    assert fc["by_date"] == date(2024, 4, 3)
+    assert fc["share"] == pytest.approx(0.45)
+    assert fc["recalibrated"] is False
+
+
+def test_forecast_open_work_recalibrates_by_past_errors():
+    fc = forecast_open_work(
+        40,
+        [3, 9, 4, 12, 6, 8, 5, 11],
+        [0.5],
+        horizon=4,
+        pace=Pace(window=6),
+        # every past outcome fell below every simulation: promise the fewest
+        past_us=[0.0] * 12,
+        now=datetime(2024, 3, 6, tzinfo=UTC),
+        seed=5,
+    )
+    assert fc["recalibrated"] is True
+    assert fc["p50"] == fc["at_least_85"]
 
 
 def _half_new_work_world(weeks: int, seed: int) -> list[tuple[str, int, int | None]]:
