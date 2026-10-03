@@ -25,6 +25,8 @@ class Container(containers.DeclarativeContainer):
     logging = providers.Resource(
         logging.config.fileConfig,
         fname=str(Path(__file__).parent / "logging.ini"),
+        # the default (True) silences loggers made before this, the CLI's among them
+        disable_existing_loggers=False,
     )
 
     config = providers.Configuration()

@@ -739,6 +739,23 @@ def test_cli_refuses_a_forecast_query_the_snapshot_was_not_saved_with():
     assert "fixVersion = 7.2" in result.output
 
 
+def test_cli_prints_the_error_that_stops_a_run():
+    issue = _raw_issue("X-1", "Done", ("2026-06-02", "Open", "Done"))
+    issue["changelog"] = "broken"
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=[issue],
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+    assert result.exit_code == 1
+    assert "Fatal error" in result.stderr
+
+
 def test_validate_config_rejects_a_focus_outside_its_range():
     for focus in ("0", "1.5", "half"):
         errors = validate_config({"from_raw": "raw.json", "forecast_focus": focus})
