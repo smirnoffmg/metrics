@@ -51,7 +51,7 @@ uv run python -m metrics --anonymous \
 open output/report.html
 ```
 
-Fetch a year of history: the replay needs it to measure how much of the work goes to issues already open, and to have enough past promises to judge. With less, the report says so - the share goes unmeasured, and too few past promises leave the forecast unchecked.
+Fetch a year of history: the replay needs it to measure how much of the work goes to issues already open, and to have enough past promises to judge. With less, the report says so - the share goes unmeasured, and too few past promises leave the forecast unchecked. The forecast itself needs seven weeks of finishes: the first is left out, since the query may start partway through it.
 
 ## Get started with your own Jira
 
@@ -65,7 +65,7 @@ Then open `output/report.html`.
 - **Jira Cloud:** also pass `--jira-email you@company.com` together with an API token.
 - **Jira Server / Data Center:** just a personal access token, no email needed.
 - **Public instance?** `--anonymous` needs no credentials at all and figures out Cloud vs Server by itself.
-- **When will this release or epic be done?** Name its issues with `--forecast-jql 'fixVersion = "9.0"'`. With enough history it is forecast from the release's own past finishes, which already leave out the time the team spent on other work, and replayed like the main forecast. If you'd rather state how much of the team works on it, `--forecast-focus 0.5` forecasts at half the team's throughput; the report marks that as an assumption it cannot check.
+- **When will this release or epic be done?** Name its issues with `--forecast-jql 'fixVersion = "9.0"'`. With seven weeks or more of its own finishes it is forecast from them, which already leave out the time the team spent on other work, and replayed like the main forecast. If you'd rather state how much of the team works on it, `--forecast-focus 0.5` forecasts at half the team's throughput; the report marks that as an assumption it cannot check.
 - **Your workflow ends differently?** Tell it what "finished" means, e.g. `--done-statuses "Resolved, Shipped"`. By default Jira's own status categories decide: statuses in the Done category finish an issue, statuses in To Do are backlog.
 - **Dropped work isn't delivery.** Statuses like `--discarded-statuses "Rejected, Duplicate"` (default: cancelled, canceled, won't do) count neither as throughput nor as open work. The same goes for issues closed with a resolution like Won't Fix or Duplicate - set your own with `--discarded-resolutions "Won't Fix, Out of scope"`.
 - **Cycle time starts at commitment, not at triage.** It runs from the moment an issue first leaves the backlog; by default, when it first leaves Jira's To Do category; name your pre-work statuses yourself with `--backlog-statuses "Open, Ready"`. Issues closed straight from the backlog have a lead time but no cycle time.

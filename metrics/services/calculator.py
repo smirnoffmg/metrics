@@ -231,8 +231,11 @@ def burndown(  # noqa: PLR0913
     team's mix of old and new work holds for a while rather than week to week.
     """
     samples, chances = pace_draws(throughput, pace)
-    draws = rng.choice(samples, size=(simulations, weeks), p=chances)
+    # shares first and weeks drawn week by week, so the first weeks of a long
+    # run are those of a short one from the same seed: the fan and the
+    # open-work headline then agree at the headline's horizon
     share = rng.choice(np.asarray(shares, dtype=float), size=(simulations, 1))
+    draws = rng.choice(samples, size=(weeks, simulations), p=chances).T
     done = np.floor(draws.cumsum(axis=1) * share * focus)
     return np.minimum(done, n_open).astype(np.int64)
 

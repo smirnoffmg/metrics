@@ -482,6 +482,20 @@ def test_burndown_never_exceeds_open_count_and_never_falls():
     assert (np.diff(done, axis=1) >= 0).all()
 
 
+def test_burndown_first_weeks_do_not_depend_on_how_far_it_runs():
+    def run(weeks):
+        return burndown(
+            50,
+            [0, 3, 7, 12],
+            np.random.default_rng(7),
+            weeks=weeks,
+            shares=(0.3, 0.6, 1.0),
+            simulations=200,
+        )
+
+    assert (run(30)[:, :4] == run(4)).all()
+
+
 def test_burndown_scales_throughput_by_share():
     done = burndown(
         100,

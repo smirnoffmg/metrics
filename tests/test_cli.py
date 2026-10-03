@@ -8,6 +8,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+import metrics.__main__ as main
 from metrics.__main__ import cli, parse_bool, parse_status_list, validate_config
 from metrics.consts import (
     BACKLOG_STATUSES,
@@ -17,6 +18,7 @@ from metrics.consts import (
     TESTING_STATUSES,
 )
 from metrics.repository.snapshot import Snapshot, save_snapshot
+from metrics.services.calculator import MIN_FORECAST_HISTORY_WEEKS
 
 
 def test_cli_missing_config():
@@ -341,6 +343,69 @@ def test_scope_forecast_uses_scope_throughput_when_history_suffices():
     assert "all 42 issues of the scope done (85% chance)" in report
 
 
+def test_scope_with_six_weeks_of_finishes_is_still_forecast():
+    team, scope = [], []
+    for week in range(30):
+        tuesday = date(2026, 2, 17) + timedelta(weeks=week)
+        for n in range(9):
+            raw = _raw_issue(
+                f"T-{week}-{n}",
+                "Done",
+                (str(tuesday), "Open", "Done"),
+                resolution="Fixed",
+            )
+            raw["fields"]["created"] = "2026-02-02T00:00:00.000+0000"
+            team.append(raw)
+    for week in range(MIN_FORECAST_HISTORY_WEEKS):
+        tuesday = date(2026, 8, 4) + timedelta(weeks=week)
+        scope += [
+            _raw_issue(
+                f"S-{week}-{n}",
+                "Done",
+                (str(tuesday), "Open", "Done"),
+                resolution="Fixed",
+            )
+            for n in range(3)
+        ]
+    scope += [_raw_issue(f"S-open-{n}", "Open") for n in range(10)]
+    for raw in scope:
+        raw["fields"]["created"] = "2026-02-02T00:00:00.000+0000"
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=team + scope,
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=scope,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    assert "nothing left to forecast, or too little history" not in report
+    assert "10 of 28 issues open; 85% chance done by" in report
+
+
+def test_the_scope_fan_promises_what_its_headline_does(monkeypatch):
+    fans = []
+
+    def recording(*args, **kwargs):
+        fans.append(real(*args, **kwargs))
+        return fans[-1]
+
+    real = main.monte_carlo_forecast
+    monkeypatch.setattr(main, "monte_carlo_forecast", recording)
+    output, _ = _run_release()
+    headline = re.search(
+        r"Scope: at least (\d+) of \d+ open issues done in (\d+)", output
+    )
+    assert headline is not None
+    promised, horizon = int(headline[1]), int(headline[2])
+    assert fans[-1]["done_at_least_85"][horizon - 1] == promised
+
+
 def test_forecast_focus_given_overrides_measured_scope():
     output, _ = _run_release("--forecast-focus", "0.5")
     assert "50% of team throughput, assumed, not checked" in output
@@ -449,6 +514,134 @@ def test_backtest_replays_issues_open_at_each_monday():
     assert "of the 32 open issues will be done in" in overview
     for jargon in ("CRPS", "u-plot", "y-plot", "Kolmogorov", "p ="):
         assert jargon not in overview
+
+
+def _uneven_weeks_issues():
+    """One to five issues done each week from a list made at once; sixty left."""
+    issues = [
+        _raw_issue(
+            f"X-{week}-{n}",
+            "Done",
+            (str(date(2026, 2, 3) + timedelta(weeks=week)), "Open", "Done"),
+            resolution="Fixed",
+        )
+        for week in range(32)
+        for n in range(week * 7 % 5 + 1)
+    ]
+    issues += [_raw_issue(f"X-open-{n}", "Open") for n in range(60)]
+    for raw in issues:
+        raw["fields"]["created"] = "2026-02-02T00:00:00.000+0000"
+    return issues
+
+
+def _forecasts_of_a_run(monkeypatch, issues=None, scope=()):
+    fans = []
+
+    def recording(*args, **kwargs):
+        fans.append(real(*args, **kwargs))
+        return fans[-1]
+
+    real = main.monte_carlo_forecast
+    monkeypatch.setattr(main, "monte_carlo_forecast", recording)
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=issues or _uneven_weeks_issues(),
+        forecast_jql="fixVersion = 7.2" if scope else "",
+        forecast_issues=list(scope),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+    return fans, result.output
+
+
+def test_two_runs_from_the_same_snapshot_forecast_the_same(monkeypatch):
+    first, _ = _forecasts_of_a_run(monkeypatch)
+    second, _ = _forecasts_of_a_run(monkeypatch)
+    assert first
+    assert first[0]["p85_date"] == second[0]["p85_date"]
+    assert (first[0]["weeks"] == second[0]["weeks"]).all()
+    assert (first[0]["done_at_least_85"] == second[0]["done_at_least_85"]).all()
+
+
+def test_the_fan_promises_what_the_headline_does_at_its_horizon(monkeypatch):
+    fans, output = _forecasts_of_a_run(monkeypatch)
+    headline = re.search(
+        r"Forecast: at least (\d+) of \d+ open issues done in (\d+)", output
+    )
+    assert headline is not None
+    promised, horizon = int(headline[1]), int(headline[2])
+    assert fans[0]["done_at_least_85"][horizon - 1] == promised
+
+
+def _short_history_with_a_cut_first_week(weeks=MIN_FORECAST_HISTORY_WEEKS + 2):
+    """One issue done the first week, as if cut by the query, six a week after.
+
+    The last week is the last complete one before the snapshot of 18 Sep 2026.
+    """
+    issues = [
+        _raw_issue(
+            f"X-{week}-{n}",
+            "Done",
+            (str(date(2026, 9, 8) - timedelta(weeks=week)), "Open", "Done"),
+            resolution="Fixed",
+        )
+        for week in range(weeks)
+        for n in range(1 if week == weeks - 1 else 6)
+    ]
+    issues += [_raw_issue(f"X-open-{n}", "Open") for n in range(60)]
+    for raw in issues:
+        raw["fields"]["created"] = "2026-07-20T00:00:00.000+0000"
+    return issues
+
+
+def test_the_fan_leaves_out_the_first_week_as_its_headline_does(monkeypatch):
+    fans, output = _forecasts_of_a_run(
+        monkeypatch, _short_history_with_a_cut_first_week()
+    )
+    headline = re.search(
+        r"Forecast: at least (\d+) of \d+ open issues done in (\d+)", output
+    )
+    assert headline is not None
+    promised, horizon = int(headline[1]), int(headline[2])
+    assert fans[0]["done_at_least_85"][horizon - 1] == promised
+
+
+def test_the_scope_fan_leaves_out_the_first_week_as_its_headline_does(monkeypatch):
+    fans, output = _forecasts_of_a_run(
+        monkeypatch, scope=_short_history_with_a_cut_first_week()
+    )
+    headline = re.search(
+        r"Scope: at least (\d+) of \d+ open issues done in (\d+)", output
+    )
+    assert headline is not None
+    promised, horizon = int(headline[1]), int(headline[2])
+    assert fans[-1]["done_at_least_85"][horizon - 1] == promised
+
+
+def test_a_scope_at_team_throughput_leaves_out_its_first_week(monkeypatch):
+    fans, _ = _forecasts_of_a_run(
+        monkeypatch,
+        _short_history_with_a_cut_first_week(),
+        scope=[_raw_issue(f"S-open-{n}", "Open") for n in range(60)],
+    )
+    assert fans[-1]["done_at_least_85"][3] == 4 * 6
+
+
+def test_a_project_needs_a_week_of_finishes_beyond_the_minimum(monkeypatch):
+    weeks = MIN_FORECAST_HISTORY_WEEKS
+    _, short = _forecasts_of_a_run(
+        monkeypatch, _short_history_with_a_cut_first_week(weeks)
+    )
+    _, enough = _forecasts_of_a_run(
+        monkeypatch, _short_history_with_a_cut_first_week(weeks + 1)
+    )
+    assert "Forecast: at least" not in short
+    assert "Forecast: at least 24 of 60 open issues done in 4 weeks" in enough
 
 
 def test_plotly_js_precedes_first_chart():

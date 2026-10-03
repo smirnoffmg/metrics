@@ -14,6 +14,7 @@ from .backtest import (
     judgeable_summaries,
     recalibration_helps,
 )
+from .calculator import MIN_FORECAST_HISTORY_WEEKS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -243,8 +244,10 @@ def forecast_verdict(  # noqa: PLR0913
     The release's lines go just before the action.
     """
     if not open_work or not forecast:
+        # the first week may start before the query's window and is left out
         return [
-            "No forecast: no open issues, or fewer than 6 weeks of finished work.",
+            "No forecast: no open issues, or fewer than"
+            f" {MIN_FORECAST_HISTORY_WEEKS + 1} weeks of finished work.",
             *release,
         ]
     verdict = [

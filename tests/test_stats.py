@@ -483,7 +483,7 @@ def test_forecast_verdict_advises_against_a_date_when_arrivals_outpace_finishes(
 
 def test_forecast_verdict_without_a_forecast():
     assert forecast_verdict({}, {}, trust(None), None, None) == [
-        "No forecast: no open issues, or fewer than 6 weeks of finished work.",
+        "No forecast: no open issues, or fewer than 7 weeks of finished work.",
     ]
 
 

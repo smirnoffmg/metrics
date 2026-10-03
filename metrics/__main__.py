@@ -64,6 +64,7 @@ from metrics.services import (  # noqa: TC001
     VisService,
 )
 from metrics.services.backtest import (
+    BACKTEST_SIMULATIONS,
     MIN_INDEPENDENT_OUTCOMES,
     MIN_RECALIBRATION_HISTORY,
     MIN_SHARE_WINDOWS,
@@ -830,9 +831,14 @@ def _forecast(
     measured = len(shares) >= MIN_SHARE_WINDOWS
     if not measured:
         shares = [1.0]
+    # as in the backtest: the first week may predate the query's window
+    history = dict(list(throughput.items())[1:])
     forecast = monte_carlo_forecast(
         issues,
-        throughput,
+        history,
+        seed=BACKTEST_SEED,
+        # as many runs as forecast_open_work, so the fan draws its headline's weeks
+        simulations=BACKTEST_SIMULATIONS,
         now=now,
         pace=pace,
         shares=shares,
@@ -846,8 +852,7 @@ def _forecast(
         )
     open_work = forecast_open_work(
         forecast["backlog"],
-        # as in the backtest: the first week may predate the query's window
-        list(throughput.values())[1:],
+        list(history.values()),
         shares,
         horizon=horizon,
         pace=pace,
@@ -1118,13 +1123,16 @@ def _forecast_scope(  # noqa: PLR0913
     already leave out the time the team spent on other work.
     """
     throughput = weekly_throughput(scope, now=now)
-    if focus is None and len(throughput) >= MIN_FORECAST_HISTORY_WEEKS:
+    # _measured_scope drops the first week, so it needs one beyond the minimum
+    if focus is None and len(throughput) > MIN_FORECAST_HISTORY_WEEKS:
         result = _measured_scope(scope, scope_moment_at, throughput, now, pace)
         note = "from the scope's own finishes"
     else:
         forecast = monte_carlo_forecast(
             scope,
-            team_throughput,
+            # as in _forecast: the first week may predate the query's window
+            dict(list(team_throughput.items())[1:]),
+            seed=BACKTEST_SEED,
             now=now,
             focus=focus or 1.0,
             pace=pace,
@@ -1176,9 +1184,14 @@ def _measured_scope(
             f" (too few past {horizon}-week windows); assuming all of them",
         )
         shares = [1.0]
+    # as in the backtest: the first week may predate the scope's first finish
+    history = dict(list(throughput.items())[1:])
     forecast = monte_carlo_forecast(
         scope,
-        throughput,
+        history,
+        seed=BACKTEST_SEED,
+        # as many runs as forecast_open_work, so the fan draws its headline's weeks
+        simulations=BACKTEST_SIMULATIONS,
         now=now,
         pace=pace,
         shares=shares,
@@ -1187,8 +1200,7 @@ def _measured_scope(
         return ScopeResult(forecast, {}, runs, None, "measured")
     open_work = forecast_open_work(
         forecast["backlog"],
-        # as in the backtest: the first week may predate the scope's first finish
-        list(throughput.values())[1:],
+        list(history.values()),
         shares,
         horizon=horizon,
         pace=pace,
@@ -1296,7 +1308,8 @@ def _render_flow_pngs(  # noqa: PLR0913
     else:
         logger.info(
             "Skipping forecast chart: no open issues"
-            " or fewer than 6 weeks of throughput history",
+            " or fewer than %d weeks of throughput history",
+            MIN_FORECAST_HISTORY_WEEKS + 1,
         )
 
 
