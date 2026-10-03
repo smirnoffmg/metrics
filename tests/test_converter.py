@@ -479,9 +479,9 @@ def test_converter_records_when_jira_resolved_the_issue():
 def test_converter_accepts_custom_discarded_resolutions():
     data_item = _issue_moving_through(
         ("2024-01-05", "Open", "Done"),
-        resolution="Out of scope",
+        resolution="Superseded",
     )
-    converter = JiraDataConverter(discarded_resolutions=["out of scope"])
+    converter = JiraDataConverter(discarded_resolutions=["superseded"])
     assert converter.convert_data_to_issue(data_item).discarded
     assert JiraDataConverter().convert_data_to_issue(data_item).was_done
 
@@ -497,6 +497,29 @@ def test_converter_discards_tracker_triage_closures_by_default():
         "Feedback Received",
         "Information Provided",
         "later",
+    ):
+        issue = JiraDataConverter().convert_data_to_issue(
+            _issue_moving_through(
+                ("2024-01-05", "Open", "Closed"),
+                resolution=resolution,
+            ),
+        )
+        assert issue.discarded, resolution
+        assert not issue.was_done, resolution
+
+
+def test_converter_discards_more_tracker_triage_closures_by_default():
+    # names as Hibernate, MB, WFLY and CONFSERVER spell them
+    for resolution in (
+        "Out of Date",
+        "Rejected",
+        "As Designed",
+        "User Error",
+        "Out of Scope",
+        "Declined",
+        "Can't Do",
+        "Answered",
+        "Incorrectly Filed",
     ):
         issue = JiraDataConverter().convert_data_to_issue(
             _issue_moving_through(
