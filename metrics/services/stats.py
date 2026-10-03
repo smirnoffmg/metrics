@@ -194,6 +194,12 @@ def scope_forecast_tile(
     )
     if scope.created_after_start:
         all_done += f"; {scope.created_after_start} created after its first finish"
+    if not open_work["at_least_85"]:
+        return Tile(
+            f"{_open_issues(open_work['n_open'])} of the scope",
+            "n/a",
+            f"{promised_done(open_work)} in {open_work['horizon']} weeks; {all_done}",
+        )
     return Tile(
         f"of {_open_issues(open_work['n_open'])} of the scope done"
         f" in {open_work['horizon']} weeks (85% chance)",
@@ -467,7 +473,18 @@ def scope_verdict(  # noqa: PLR0913
     open_count and total count its issues open now and all of them.
     """
     if open_count == 0:
-        return [f"Release {jql} done: none of its {total} issues open."]
+        finished = [f"Release {jql} done: none of its {total} issues open."]
+        if trust.word != "optimistic":
+            return finished
+        # nothing is left to forecast, but the next release's forecast is
+        # built the same way and inherits the failure
+        horizon = f"{trust.horizon}-week " if trust.horizon else ""
+        return [
+            *finished,
+            f"Its past {horizon}forecasts held only {trust.held} of {trust.of}"
+            " times, fewer than the 85% promised: treat release forecasts"
+            " for this project as optimistic.",
+        ]
     forecast = scope.forecast
     if scope.why_not or not forecast:
         return [f"Release {jql}: {scope.why_not or 'too little history'}."]

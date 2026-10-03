@@ -170,9 +170,21 @@ def test_scope_forecast_tile_counts_the_open_issue_and_late_additions():
         created_after_start=3,
     )
     tile = scope_forecast_tile(one_open, open_count=1, total=263)
-    assert tile.label == "of 1 open issue of the scope done in 8 weeks (85% chance)"
-    assert tile.delta_text == (
-        "not all within 2 years; 3 created after its first finish"
+    assert tile == Tile(
+        "1 open issue of the scope",
+        "n/a",
+        "the 1 open issue cannot be promised done in 8 weeks;"
+        " not all within 2 years; 3 created after its first finish",
+    )
+
+
+def test_scope_forecast_tile_shows_no_count_when_none_can_be_promised():
+    # "≥ 0 of 4" read as a forecast while the CLI and verdict promise nothing
+    nothing = _measured_scope(open_work=_open_work(n_open=4, at_least_85=0.0))
+    assert scope_forecast_tile(nothing, open_count=4, total=6) == Tile(
+        "4 open issues of the scope",
+        "n/a",
+        "none of 4 open issues can be promised done in 8 weeks; all by 01 Feb 2024",
     )
 
 
@@ -679,6 +691,48 @@ def test_scope_verdict_says_a_finished_release_is_done_without_a_chance():
         "fixVersion = 7.2",
         ScopeResult({}, {}, {}, None, "measured"),
         trust(None),
+        open_count=0,
+        total=65,
+    )
+    assert verdict == ["Release fixVersion = 7.2 done: none of its 65 issues open."]
+
+
+def test_scope_verdict_judges_a_finished_release_whose_replay_failed():
+    # WFLY 39: done, yet its 4-week promises held 1 of 6, which the next
+    # release's forecast inherits
+    verdict = scope_verdict(
+        "fixVersion = 39",
+        ScopeResult({}, {}, {}, None, "measured"),
+        Trust("optimistic", 1, 6, horizon=4),
+        open_count=0,
+        total=65,
+    )
+    assert verdict == [
+        "Release fixVersion = 39 done: none of its 65 issues open.",
+        "Its past 4-week forecasts held only 1 of 6 times, fewer than the 85%"
+        " promised: treat release forecasts for this project as optimistic.",
+    ]
+
+
+def test_scope_verdict_judges_a_finished_release_at_its_judged_horizon():
+    verdict = scope_verdict(
+        "fixVersion = 2.7.0",
+        ScopeResult({}, {}, {}, None, "measured"),
+        Trust("optimistic", 0, 3),
+        open_count=0,
+        total=40,
+    )
+    assert verdict[1] == (
+        "Its past forecasts held only 0 of 3 times, fewer than the 85%"
+        " promised: treat release forecasts for this project as optimistic."
+    )
+
+
+def test_scope_verdict_leaves_a_finished_release_unjudged_when_its_replay_held():
+    verdict = scope_verdict(
+        "fixVersion = 7.2",
+        ScopeResult({}, {}, {}, None, "measured"),
+        Trust("holds", 10, 11),
         open_count=0,
         total=65,
     )
