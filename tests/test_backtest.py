@@ -9,24 +9,31 @@ from statistics import fmean
 import numpy as np
 import pytest
 
+from metrics.entity import Issue
 from metrics.services.backtest import (
     Backtest,
     BacktestSummary,
+    Moment,
     backtest_forecast,
+    backtest_open_work,
     backtest_paces,
     bootstrap_totals,
     choose_pace,
     crps,
     judged_summary,
     kolmogorov_distance,
+    moment_of,
+    open_work_totals,
+    past_shares,
     probability_integral,
     recalibrate,
     recalibration_helps,
     steady_bias,
     summarize_backtests,
     trend_values,
+    window_share,
 )
-from metrics.services.calculator import Pace
+from metrics.services.calculator import Pace, weekly_throughput
 
 MONDAY = date(2024, 1, 1)
 
@@ -44,6 +51,40 @@ def _throughput_known_at(weekly: list[int]):
             for i, count in enumerate(weekly)
             if MONDAY + timedelta(weeks=i + 1) <= at.date()
         }
+
+    return known_at
+
+
+def _moment_known_at(world: list[tuple[str, int, int | None]]):
+    """Moments of a world of (key, week created, week done or None), from MONDAY on.
+
+    Issues are created on the Tuesday and done on the Thursday of their week,
+    so an issue created and done within one week is never open on a Monday.
+    """
+
+    def known_at(at: datetime) -> Moment:
+        day = at.date()
+        created = [
+            (key, done)
+            for key, made, done in world
+            if MONDAY + timedelta(weeks=made, days=1) <= day
+        ]
+        done_keys = frozenset(
+            key
+            for key, done in created
+            if done is not None and MONDAY + timedelta(weeks=done, days=3) <= day
+        )
+        weeks_over = (day - MONDAY).days // 7
+        return Moment(
+            throughput={
+                _week_key(MONDAY + timedelta(weeks=i)): sum(
+                    1 for _, _, done in world if done == i
+                )
+                for i in range(weeks_over)
+            },
+            open_keys=frozenset(key for key, _ in created) - done_keys,
+            done_keys=done_keys,
+        )
 
     return known_at
 
@@ -334,6 +375,12 @@ def test_summary_of_one_outcome_has_no_trend_test():
     assert summary.trend_p is None
 
 
+def test_summary_of_outcomes_all_below_every_simulation_has_no_trend_test():
+    summary = summarize_backtests(_in_time([0.0] * 10))
+    assert summary is not None
+    assert summary.trend_p is None
+
+
 def test_recalibrate_to_honest_past_errors_keeps_the_forecast():
     raw = np.arange(1, 101)
     past = [(k + 0.5) / 50 for k in range(50)]
@@ -400,3 +447,223 @@ def test_recalibration_helps_only_with_a_lower_crps():
     raw = _scored(8, 10, 37.6)
     assert not recalibration_helps(raw, _scored(8, 10, 40.2))
     assert recalibration_helps(raw, _scored(8, 10, 35.0))
+
+
+def test_moment_of_records_open_and_done_keys_and_throughput():
+    at = datetime(2024, 1, 15, tzinfo=UTC)
+    issues = [
+        Issue(
+            key="DONE-1",
+            status="Done",
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+            last_finish_status_at=datetime(2024, 1, 3, tzinfo=UTC),
+        ),
+        Issue(
+            key="OPEN-1",
+            status="New",
+            created_at=datetime(2024, 1, 2, tzinfo=UTC),
+        ),
+        Issue(
+            key="GONE-1",
+            status="Won't do",
+            created_at=datetime(2024, 1, 2, tzinfo=UTC),
+            discarded=True,
+        ),
+    ]
+    moment = moment_of(issues, at)
+    assert moment.open_keys == {"OPEN-1"}
+    assert moment.done_keys == {"DONE-1"}
+    assert moment.throughput == weekly_throughput(issues, now=at)
+
+
+def test_window_share_counts_only_keys_open_at_start():
+    weeks = ["2024W01", "2024W02"]
+    start = Moment(
+        throughput={}, open_keys=frozenset({"A", "B"}), done_keys=frozenset()
+    )
+    end = Moment(
+        throughput={"2024W01": 2, "2024W02": 2},
+        open_keys=frozenset({"B"}),
+        done_keys=frozenset({"A", "NEW-1", "NEW-2", "NEW-3"}),
+    )
+    assert window_share(start, end, weeks) == pytest.approx(0.25)
+
+
+def test_window_share_ignores_issue_reopened_by_end():
+    weeks = ["2024W01"]
+    start = Moment(
+        throughput={}, open_keys=frozenset({"A", "B"}), done_keys=frozenset()
+    )
+    # A was finished during the week and reopened before its end
+    end = Moment(
+        throughput={"2024W01": 2},
+        open_keys=frozenset({"A"}),
+        done_keys=frozenset({"B", "NEW-1"}),
+    )
+    assert window_share(start, end, weeks) == pytest.approx(0.5)
+
+
+def test_window_share_without_finishes_is_none():
+    start = Moment(throughput={}, open_keys=frozenset({"A"}), done_keys=frozenset())
+    end = Moment(
+        throughput={"2024W01": 0}, open_keys=frozenset({"A"}), done_keys=frozenset()
+    )
+    assert window_share(start, end, ["2024W01"]) is None
+
+
+def test_window_share_is_at_most_one():
+    start = Moment(
+        throughput={}, open_keys=frozenset({"A", "B"}), done_keys=frozenset()
+    )
+    # B's finish fell into the week before, read in the issue's own timezone
+    end = Moment(
+        throughput={"2024W01": 1, "2024W02": 1},
+        open_keys=frozenset(),
+        done_keys=frozenset({"A", "B"}),
+    )
+    assert window_share(start, end, ["2024W02"]) == 1.0
+
+
+def test_past_shares_uses_only_windows_ending_by_origin():
+    world = [(f"OLD-{i}", 0, 1 + i // 2) for i in range(40)]
+    known_at = _moment_known_at(world)
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(20)]
+    asked = []
+
+    def recording(at: datetime) -> Moment:
+        asked.append(at)
+        return known_at(at)
+
+    shares = past_shares(recording, weeks, until=10, horizon=2)
+    # windows start at weeks 1..8; the first week may be partial
+    assert len(shares) == 8  # noqa: PLR2004
+    assert max(asked) == datetime(2024, 3, 11, tzinfo=UTC)
+    assert all(share == 1.0 for share in shares)
+
+
+def test_past_shares_skips_windows_without_finishes():
+    world = [("OLD-1", 0, 5), ("OLD-2", 0, None)]
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(10)]
+    shares = past_shares(_moment_known_at(world), weeks, until=10, horizon=1)
+    assert shares == [1.0]
+
+
+def test_past_shares_of_no_weeks_are_empty():
+    assert past_shares(_moment_known_at([]), [], until=0, horizon=4) == []
+
+
+def test_open_work_totals_never_exceed_open_count():
+    rng = np.random.default_rng(0)
+    totals = open_work_totals(7, [10, 20, 30] * 4, [0.5, 1.0], 4, rng, pace=Pace(12))
+    assert totals.max() == 7  # noqa: PLR2004
+    assert totals.min() >= 0
+
+
+def _half_new_work_world(weeks: int, seed: int) -> list[tuple[str, int, int | None]]:
+    """A long backlog worked off beside new issues finished the week they arrive."""
+    rng = np.random.default_rng(seed)
+    world: list[tuple[str, int, int | None]] = []
+    old = 0
+    for week in range(weeks):
+        for _ in range(int(rng.integers(3, 8))):
+            world.append((f"OLD-{old}", 0, week))
+            old += 1
+        world.extend(
+            (f"NEW-{week}-{n}", week, week) for n in range(int(rng.integers(3, 8)))
+        )
+    world.extend((f"OLD-{old + n}", 0, None) for n in range(100))
+    return world
+
+
+def test_open_work_backtest_holds_when_half_of_finishes_are_new_work():
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(40)]
+    known_at = _moment_known_at(_half_new_work_world(40, seed=3))
+    model = backtest_open_work(known_at, weeks, horizon=4, pace=Pace(12), seed=1)
+    baseline = backtest_open_work(
+        known_at, weeks, horizon=4, pace=Pace(12), assume_share=1.0, seed=1
+    )
+    held = summarize_backtests(model)
+    old_held = summarize_backtests(baseline)
+    assert held is not None
+    assert old_held is not None
+    assert held.held_85 >= 0.75  # noqa: PLR2004
+    assert old_held.held_85 < 0.5  # noqa: PLR2004
+    assert float(np.median([r.u for r in baseline])) < 0.2  # noqa: PLR2004
+    assert [r.origin for r in model] == [r.origin for r in baseline]
+
+
+def test_open_work_backtest_counts_issues_open_at_origin_done_by_horizon_end():
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(20)]
+    world = _half_new_work_world(20, seed=3)
+    known_at = _moment_known_at(world)
+    results = backtest_open_work(known_at, weeks, horizon=4, pace=Pace(12), seed=1)
+    first = results[0]
+    origin_week = (first.origin - MONDAY).days // 7
+    expected = sum(
+        1
+        for key, _, done in world
+        if key.startswith("OLD") and done is not None
+        if origin_week <= done < origin_week + 4
+    )
+    assert first.actual == expected
+
+
+def test_open_work_backtest_skips_origins_with_too_few_shares():
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(20)]
+    known_at = _moment_known_at(_half_new_work_world(20, seed=3))
+    results = backtest_open_work(
+        known_at, weeks, horizon=4, pace=Pace(12), min_history=6, min_shares=6, seed=1
+    )
+    # origin i has windows 1..i-4 behind it: six of them first at week 10
+    assert results[0].origin == MONDAY + timedelta(weeks=10)
+    assert results[-1].origin == MONDAY + timedelta(weeks=16)
+
+
+def test_open_work_backtest_uses_no_shares_from_after_an_early_origin():
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(40)]
+    known_at = _moment_known_at(_half_new_work_world(40, seed=3))
+    results = backtest_open_work(known_at, weeks, horizon=8, pace=Pace(12), seed=1)
+    # no 8-week window ends by week 7; six of them first by week 14
+    assert results[0].origin == MONDAY + timedelta(weeks=14)
+
+
+def test_open_work_backtest_of_no_weeks_is_empty():
+    # open issues with nothing finished yet give no complete weeks
+    known_at = _moment_known_at([("OPEN-1", 0, None)])
+    assert backtest_open_work(known_at, [], horizon=4, pace=Pace(12)) == []
+
+
+def test_open_work_backtest_recalibrates_from_known_outcomes():
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(40)]
+    known_at = _moment_known_at(_half_new_work_world(40, seed=3))
+    raw = backtest_open_work(
+        known_at, weeks, horizon=4, pace=Pace(12), assume_share=1.0, seed=1
+    )
+    corrected = backtest_open_work(
+        known_at,
+        weeks,
+        horizon=4,
+        pace=Pace(12),
+        assume_share=1.0,
+        seed=1,
+        recalibrate_after=3,
+    )
+    # a 4-week forecast is known four Mondays later: the seventh has three behind it
+    assert [r.p50 for r in corrected[:6]] == [r.p50 for r in raw[:6]]
+    assert fmean(r.crps for r in corrected[6:]) < fmean(r.crps for r in raw[6:])
+
+
+def test_summary_counts_held_among_independent_forecasts():
+    held = [8, 8, 3, 8, 8, 3]
+    results = [
+        replace(
+            _backtest(0.5, actual=actual, at_least_85=5, score=1.0),
+            origin=MONDAY + timedelta(weeks=2 * i),
+        )
+        for i, actual in enumerate(held)
+    ]
+    summary = summarize_backtests(results)
+    assert summary is not None
+    # 4-week horizons two weeks apart: forecasts 0, 2 and 4 are independent
+    assert summary.independent == 3  # noqa: PLR2004
+    assert summary.held_independent == 2  # noqa: PLR2004

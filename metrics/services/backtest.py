@@ -17,10 +17,19 @@ from typing import TYPE_CHECKING, Final
 import numpy as np
 from scipy import stats
 
-from .calculator import DEFAULT_PACE, MIN_FORECAST_HISTORY_WEEKS, Pace, pace_draws
+from .calculator import (
+    DEFAULT_PACE,
+    MIN_FORECAST_HISTORY_WEEKS,
+    Pace,
+    burndown,
+    pace_draws,
+    weekly_throughput,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+
+    from metrics.entity import Issue
 
 BACKTEST_HORIZON_WEEKS: Final[int] = 4
 # short horizons alongside the forecast's own: far more outcomes that do not overlap
@@ -41,6 +50,9 @@ SIGNIFICANCE: Final[float] = 0.05
 MIN_RECALIBRATION_HISTORY: Final[int] = 10
 CRPS_TIE_TOLERANCE: Final[float] = 0.05
 BACKTEST_SIMULATIONS: Final[int] = 10_000
+# past windows a share of finishes going to already open issues needs before it
+# stands in for the next one
+MIN_SHARE_WINDOWS: Final[int] = 6
 
 
 @dataclass(frozen=True)
@@ -72,6 +84,73 @@ class BacktestSummary:
     # consistent bias, y-plot for errors drifting over time; None if untestable
     bias_p: float | None = None
     trend_p: float | None = None
+    held_independent: int = 0
+
+
+@dataclass(frozen=True)
+class Moment:
+    """What Jira showed at one moment: weekly finishes, open and done issues."""
+
+    throughput: dict[str, int]
+    open_keys: frozenset[str]
+    done_keys: frozenset[str]
+
+
+def moment_of(issues: Sequence[Issue], at: datetime) -> Moment:
+    """Keep what the open-work backtest needs of issues as they were at a moment."""
+    return Moment(
+        throughput=weekly_throughput(issues, now=at),
+        open_keys=frozenset(issue.key for issue in issues if issue.is_open),
+        done_keys=frozenset(issue.key for issue in issues if issue.was_done),
+    )
+
+
+def window_share(start: Moment, end: Moment, weeks: Sequence[str]) -> float | None:
+    """Share of the window's finishes that went to issues open at its start.
+
+    Both counts are as known at the window's end, so an issue reopened by then
+    counts in neither. None when nothing was finished.
+    """
+    finished = sum(end.throughput.get(week, 0) for week in weeks)
+    if finished == 0:
+        return None
+    return min(1.0, len(start.open_keys & end.done_keys) / finished)
+
+
+def past_shares(
+    moment_at: Callable[[datetime], Moment],
+    weeks: Sequence[str],
+    *,
+    until: int,
+    horizon: int,
+) -> list[float]:
+    """Shares of finishes going to open issues in windows ending by weeks[until]."""
+    return [
+        share
+        for share in _window_shares(moment_at, weeks, until=until, horizon=horizon)
+        if share is not None
+    ]
+
+
+def _window_shares(
+    moment_at: Callable[[datetime], Moment],
+    weeks: Sequence[str],
+    *,
+    until: int,
+    horizon: int,
+) -> list[float | None]:
+    if not weeks:
+        return []
+    first = _monday(weeks[0])
+    # the first week can have started before the query's window, so it is left out
+    return [
+        window_share(
+            moment_at(_midnight(first + timedelta(weeks=j))),
+            moment_at(_midnight(first + timedelta(weeks=j + horizon))),
+            weeks[j : j + horizon],
+        )
+        for j in range(1, until - horizon + 1)
+    ]
 
 
 def bootstrap_totals(
@@ -84,6 +163,29 @@ def bootstrap_totals(
     """Issues finished over the horizon, drawing weeks as the forecast does."""
     samples, chances = pace_draws(history, pace)
     return rng.choice(samples, size=(simulations, horizon), p=chances).sum(axis=1)
+
+
+def open_work_totals(  # noqa: PLR0913
+    n_open: int,
+    history: Sequence[int],
+    shares: Sequence[float],
+    horizon: int,
+    rng: np.random.Generator,
+    *,
+    pace: Pace,
+    simulations: int = BACKTEST_SIMULATIONS,
+) -> np.ndarray:
+    """Issues of an open list done over the horizon, as the forecast simulates them."""
+    done = burndown(
+        n_open,
+        history,
+        rng,
+        weeks=horizon,
+        pace=pace,
+        shares=shares,
+        simulations=simulations,
+    )
+    return done[:, horizon - 1]
 
 
 def recalibrate(totals: np.ndarray, past_us: Sequence[float]) -> np.ndarray:
@@ -178,6 +280,72 @@ def backtest_forecast(  # noqa: PLR0913
         later = throughput_at(_midnight(origin + timedelta(weeks=horizon)))
         actual = sum(later.get(week, 0) for week in weeks[i : i + horizon])
         totals = predictor(history, horizon, rng)
+        known_on = origin + timedelta(weeks=horizon)
+        raw_us.append((known_on, probability_integral(totals, actual)))
+        past_us = [u for on, u in raw_us[:-1] if on <= origin]
+        if recalibrate_after is not None and len(past_us) >= recalibrate_after:
+            totals = recalibrate(totals, past_us)
+        results.append(
+            Backtest(
+                origin=origin,
+                horizon=horizon,
+                actual=actual,
+                p50=float(np.percentile(totals, 50)),
+                at_least_85=float(np.percentile(totals, 15, method="lower")),
+                u=probability_integral(totals, actual),
+                crps=crps(totals, actual),
+            ),
+        )
+    return results
+
+
+def backtest_open_work(  # noqa: PLR0913
+    moment_at: Callable[[datetime], Moment],
+    weeks: Sequence[str],
+    *,
+    horizon: int,
+    pace: Pace,
+    min_history: int = MIN_FORECAST_HISTORY_WEEKS,
+    min_shares: int = MIN_SHARE_WINDOWS,
+    assume_share: float | None = None,
+    seed: int | None = None,
+    recalibrate_after: int | None = None,
+) -> list[Backtest]:
+    """Forecast from each past Monday how many of the issues open then get done.
+
+    Throughput is scaled by past shares of finishes that went to issues
+    already open, from windows that ended by the Monday; assume_share replaces
+    them, 1.0 being the old belief that all throughput goes to the open list.
+    Origins without min_shares such windows are skipped either way, so a
+    baseline replays the same Mondays. Recalibration as in backtest_forecast.
+    """
+    rng = np.random.default_rng(seed)
+    moment_at = cache(moment_at)
+    mondays = [_monday(week) for week in weeks]
+    shares_by_window = _window_shares(
+        moment_at, weeks, until=len(weeks), horizon=horizon
+    )
+    results = []
+    raw_us: list[tuple[date, float]] = []
+    for i in range(1 + min_history, len(mondays) - horizon + 1):
+        origin = mondays[i]
+        known = moment_at(_midnight(origin))
+        history = [
+            count for week, count in known.throughput.items() if week != weeks[0]
+        ]
+        shares = [s for s in shares_by_window[: max(0, i - horizon)] if s is not None]
+        if len(history) < min_history or len(shares) < min_shares:
+            continue
+        later = moment_at(_midnight(origin + timedelta(weeks=horizon)))
+        actual = len(known.open_keys & later.done_keys)
+        totals = open_work_totals(
+            len(known.open_keys),
+            history,
+            shares if assume_share is None else (assume_share,),
+            horizon,
+            rng,
+            pace=pace,
+        )
         known_on = origin + timedelta(weeks=horizon)
         raw_us.append((known_on, probability_integral(totals, actual)))
         past_us = [u for on, u in raw_us[:-1] if on <= origin]
@@ -308,7 +476,8 @@ def summarize_backtests(results: Sequence[Backtest]) -> BacktestSummary | None:
     """Share of 85% claims that held, distance from honest u values, mean CRPS."""
     if not results:
         return None
-    independent = [r.u for r in independent_forecasts(results)]
+    picked = independent_forecasts(results)
+    independent = [r.u for r in picked]
     return BacktestSummary(
         horizon=results[0].horizon,
         count=len(results),
@@ -317,9 +486,11 @@ def summarize_backtests(results: Sequence[Backtest]) -> BacktestSummary | None:
         kolmogorov=kolmogorov_distance([r.u for r in results]),
         mean_crps=fmean(r.crps for r in results),
         bias_p=float(stats.kstest(independent, "uniform").pvalue),
+        # with every u at 0 the Y-plot divides by a zero sum: drift is untestable
         trend_p=float(stats.kstest(trend_values(independent), "uniform").pvalue)
-        if len(independent) > 1
+        if len(independent) > 1 and any(independent)
         else None,
+        held_independent=sum(r.actual >= r.at_least_85 for r in picked),
     )
 
 
@@ -336,6 +507,10 @@ def independent_forecasts(results: Sequence[Backtest]) -> list[Backtest]:
             picked.append(result)
             free_from = result.origin + timedelta(weeks=result.horizon)
     return picked
+
+
+def _monday(week: str) -> date:
+    return date.fromisocalendar(int(week[:4]), int(week[5:]), 1)
 
 
 def _midnight(day: date) -> datetime:
