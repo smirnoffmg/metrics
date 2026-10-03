@@ -35,7 +35,7 @@ The same forecast is replayed from every past Monday, from only what Jira showed
 >
 > *- Kafka*
 
-The second line is a separate check. Each forecast is a range, from its 5th to its 95th percentile, and an honest one leaves only about 1 outcome in 10 outside it. When far more fall outside on either side, the report says the range is too narrow, even if the 85% count itself holds.
+The second line is a separate check. Each forecast is a range, from its 5th to its 95th percentile, and an honest one leaves only about 1 outcome in 10 outside it. When far more fall outside on either side, the report says the range is too narrow, even if the 85% count itself holds, and then advises committing to fewer than the number rather than to it.
 
 **3. Will the open list ever clear?**
 

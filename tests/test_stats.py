@@ -718,15 +718,17 @@ def test_scope_verdict_judges_a_finished_release_whose_replay_failed():
 
 
 def test_scope_verdict_judges_a_finished_release_at_its_judged_horizon():
+    # IGNITE 3.1: its judged 4-week replay itself rejects, with no shorter one
+    four = replace(_summary(6, 11), horizon=4)
     verdict = scope_verdict(
-        "fixVersion = 2.7.0",
+        "fixVersion = 3.1",
         ScopeResult({}, {}, {}, None, "measured"),
-        Trust("optimistic", 0, 3),
+        heeded_trust(four, [four]),
         open_count=0,
         total=40,
     )
     assert verdict[1] == (
-        "Its past forecasts held only 0 of 3 times, fewer than the 85%"
+        "Its past 4-week forecasts held only 6 of 11 times, fewer than the 85%"
         " promised: treat release forecasts for this project as optimistic."
     )
 
@@ -1048,9 +1050,9 @@ def test_heeded_trust_takes_a_rejection_at_a_shorter_horizon():
 def test_heeded_trust_keeps_the_judged_horizon_without_a_shorter_rejection():
     four = replace(_summary(4, independent=4), horizon=4)
     eight = _summary(11, independent=12)
-    assert heeded_trust(eight, [four, eight]) == Trust("holds", 11, 12)
+    assert heeded_trust(eight, [four, eight]) == Trust("holds", 11, 12, horizon=8)
     longer = replace(_summary(0, independent=3), horizon=12)
-    assert heeded_trust(eight, [eight, longer]) == Trust("holds", 11, 12)
+    assert heeded_trust(eight, [eight, longer]) == Trust("holds", 11, 12, horizon=8)
     assert heeded_trust(None, []) == Trust("unchecked", 0, 0)
 
 
@@ -1142,7 +1144,31 @@ def test_forecast_verdict_says_the_range_is_too_narrow_after_the_trust():
     plain = forecast_verdict(
         _open_work(), _dated_forecast(), Trust("holds", 9, 11), None, None
     )
-    assert verdict[:2] + verdict[3:] == plain
+    assert verdict[:2] + verdict[3:-1] == plain[:-1]
+
+
+def test_forecast_verdict_does_not_say_commit_when_the_range_is_too_narrow():
+    # MB: 7 of 11 held, within chance of 85%, yet 6 of 11 outcomes fell outside
+    # the range, so the number is too high more often than it says
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("holds", 7, 11),
+        None,
+        None,
+        narrow=_tails(6, 11),
+    )
+    assert verdict[-1] == "Commit to fewer than the number."
+
+
+def test_backtest_tile_flags_a_range_too_narrow():
+    narrow = _tails(6, 11)
+    assert backtest_tile(narrow, [narrow]) == Tile(
+        "past 8-week promises held",
+        "11 of 11",
+        "range too narrow",
+        delta_good=False,
+    )
 
 
 def test_spread_note_gives_the_test_behind_the_verdict():

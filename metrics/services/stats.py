@@ -50,7 +50,7 @@ class Trust:
     word: Literal["holds", "optimistic", "cautious", "unchecked"]
     held: int
     of: int
-    # set when a shorter replayed horizon than the forecast's judged it
+    # the replayed horizon that judged it, which may be shorter than the forecast's
     horizon: int | None = None
 
 
@@ -226,6 +226,8 @@ def backtest_tile(
     word = heeded.word
     if word == "optimistic":
         return Tile(label, value, "fewer than promised", delta_good=False)
+    if narrow_spread(summary, summaries) is not None:
+        return Tile(label, value, "range too narrow", delta_good=False)
     if word == "cautious":
         return Tile(label, value, "more than promised")
     if word == "unchecked":
@@ -260,8 +262,10 @@ def heeded_trust(
     The judged horizon may have too few outcomes to say anything, while a
     shorter one already shows its promises failing beyond chance.
     """
-    judged_trust = trust(judged)
-    if judged is None or judged_trust.word == "optimistic":
+    if judged is None:
+        return trust(judged)
+    judged_trust = replace(trust(judged), horizon=judged.horizon)
+    if judged_trust.word == "optimistic":
         return judged_trust
     shorter = sorted(
         (s for s in summaries if s.horizon < judged.horizon),
@@ -385,6 +389,9 @@ def forecast_verdict(  # noqa: PLR0913
         )
         return verdict
     action = _ACTIONS[trust.word]
+    if narrow is not None and trust.word != "optimistic":
+        # outcomes beyond the low end are what break an "at least" promise
+        action = "Commit to fewer than the number."
     # a release with no number of its own has none to treat as optimistic
     if (
         release_at_least
