@@ -150,6 +150,48 @@ def test_cli_builds_the_report_from_a_saved_snapshot_without_jira():
     assert "https://jira.example/browse/X-99" in report
 
 
+def test_cli_report_names_no_assignee():
+    passed_on = _raw_issue(
+        "X-1",
+        "Done",
+        ("2026-06-02", "Open", "In Progress"),
+        ("2026-06-20", "In Progress", "Done"),
+        resolution="Fixed",
+    )
+    passed_on["fields"]["assignee"] = {"displayName": "Zelda Quartermain"}
+    passed_on["changelog"]["histories"].append(
+        {
+            "created": "2026-06-10T00:00:00.000+0000",
+            "items": [
+                {
+                    "field": "assignee",
+                    "from": "bob",
+                    "fromString": "Bob Lindqvist",
+                    "to": "zelda",
+                    "toString": "Zelda Quartermain",
+                },
+            ],
+        },
+    )
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=[passed_on],
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+        assert not list(Path("output").glob("assignee*"))
+        assert Path("output/handoffs.png").exists()
+    assert "Zelda" not in report
+    assert "Lindqvist" not in report
+    assert "assignee" not in report.lower()
+
+
 def test_cli_classifies_statuses_by_category_unless_told_otherwise():
     issues = [
         _raw_issue(

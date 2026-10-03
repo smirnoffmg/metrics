@@ -312,30 +312,9 @@ def cumulative_flow(
     return pd.DataFrame(data, index=pd.Index(sample_days, name="date"))
 
 
-def assignee_load(
-    issues: Sequence[Issue],
-    top: int = 15,
-) -> tuple[pd.DataFrame, list[int]]:
-    """Return (per-assignee time-in-flight frame, handoffs per issue)."""
-    totals: dict[str, float] = defaultdict(float)
-    issue_counts: dict[str, int] = defaultdict(int)
-    handoffs = []
-    for issue in issues:
-        handoffs.append(issue.handoffs)
-        for assignee, td in issue.doers_x_periods.items():
-            if assignee is None:
-                continue
-            totals[assignee] += td.total_seconds() / ONE_DAY
-            issue_counts[assignee] += 1
-    df = pd.DataFrame(
-        {
-            "assignee": list(totals),
-            "total_days": [totals[a] for a in totals],
-            "issue_count": [issue_counts[a] for a in totals],
-        },
-    )
-    df = df.sort_values("total_days", ascending=False).head(top).reset_index(drop=True)
-    return df, handoffs
+def handoffs_per_issue(issues: Sequence[Issue]) -> list[int]:
+    """Return how many times each issue changed hands."""
+    return [issue.handoffs for issue in issues]
 
 
 def flow_efficiency(

@@ -66,11 +66,11 @@ from metrics.services.calculator import (
     DEFAULT_PACE,
     Pace,
     aging_wip,
-    assignee_load,
     cumulative_flow,
     cycle_time_points,
     cycle_times,
     flow_efficiency,
+    handoffs_per_issue,
     lead_times,
     median_queue_hours,
     monte_carlo_forecast,
@@ -629,7 +629,6 @@ def calculate_metrics(  # noqa: PLR0913
     forecast = monte_carlo_forecast(issues, throughput, now=now, pace=pace)
     if forecast and past_us is not None:
         forecast = recalibrate_forecast(forecast, past_us, now)
-    load, handoffs = assignee_load(issues)
 
     report_images = _render_static_charts(
         issues,
@@ -637,8 +636,6 @@ def calculate_metrics(  # noqa: PLR0913
         vis_service,
         output_dir,
         throughput,
-        load,
-        handoffs,
     )
     _render_flow_pngs(vis_service, output_dir, scatter, cfd, aging, forecast)
 
@@ -939,14 +936,12 @@ def _forecast_scope(  # noqa: PLR0913
     return result, summary
 
 
-def _render_static_charts(  # noqa: PLR0913
+def _render_static_charts(
     issues: list[Issue],
     testing_statuses: list[str],
     vis_service: VisService,
     output_dir: Path,
     throughput: dict[str, int],
-    load: pd.DataFrame,
-    handoffs: list[int],
 ) -> list[Path]:
     charts = []
     durations = (
@@ -982,8 +977,8 @@ def _render_static_charts(  # noqa: PLR0913
     vis_service.vis_queue_grid(str(path), queue_times(issues))
     charts.append(path)
 
-    path = output_dir / "assignee_load.png"
-    vis_service.vis_assignee_load(str(path), load, handoffs)
+    path = output_dir / "handoffs.png"
+    vis_service.vis_handoffs(str(path), handoffs_per_issue(issues))
     charts.append(path)
     return charts
 

@@ -514,42 +514,20 @@ class VisService(BaseService):
         ax.set_title("Cumulative Flow Diagram")
         self._save_figure(fig, filename)
 
-    def vis_assignee_load(
-        self,
-        filename: str,
-        df: pd.DataFrame,
-        handoffs: list[int],
-    ) -> None:
-        """Render per-assignee time-in-flight and handoffs distribution."""
-        fig, (ax_load, ax_handoffs) = plt.subplots(1, 2, figsize=WIDE_FIGSIZE)
-        if not df.empty:
-            bars = ax_load.barh(df["assignee"], df["total_days"], color=SERIES)
-            ax_load.set_yticks(
-                df["assignee"],
-                labels=(df["assignee"] + " (" + df["issue_count"].astype(str) + ")"),
-            )
-            ax_load.invert_yaxis()
-            ax_load.bar_label(
-                bars,
-                fmt="%.1fd",
-                padding=4,
-                color=INK_SECONDARY,
-            )
-        ax_load.set_xlabel("total days in flight (issue count)")
-        ax_load.set_title("Assignee Load")
-        ax_load.grid(axis="x")
+    def vis_handoffs(self, filename: str, handoffs: Sequence[int]) -> None:
+        """Render the distribution of handoffs per issue."""
+        fig, ax = plt.subplots()
         if handoffs:
-            ax_handoffs.hist(
+            ax.hist(
                 handoffs,
                 bins=range(min(handoffs), max(handoffs) + 2),
                 rwidth=0.9,
                 align="left",
                 color=SERIES,
             )
-        ax_handoffs.set_xlabel("handoffs per issue")
-        ax_handoffs.set_ylabel("issues")
-        ax_handoffs.set_title("Handoffs")
-        fig.tight_layout()
+        ax.set_xlabel("handoffs per issue")
+        ax.set_ylabel("issues")
+        ax.set_title("Handoffs")
         self._save_figure(fig, filename)
 
     def _tail_histogram(

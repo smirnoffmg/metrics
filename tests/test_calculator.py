@@ -11,11 +11,11 @@ from metrics.entity.issues import Issue, StatusTransition
 from metrics.services.calculator import (
     Pace,
     aging_wip,
-    assignee_load,
     cumulative_flow,
     cycle_time_points,
     cycle_times,
     flow_efficiency,
+    handoffs_per_issue,
     lead_times,
     median_queue_hours,
     monte_carlo_forecast,
@@ -361,27 +361,19 @@ def test_cumulative_flow_daily_counts():
     assert list(df["In Progress"]) == [0, 0, 1, 1, 1]
 
 
-def test_assignee_load_aggregates_and_drops_unassigned():
-    first = Issue(
+def test_handoffs_per_issue_counts_changes_of_hands():
+    passed_twice = Issue(
         key="A",
         status="Done",
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
-        doers_x_periods={"alice": timedelta(days=2), None: timedelta(days=1)},
         handoffs=2,
     )
-    second = Issue(
+    kept = Issue(
         key="B",
-        status="Done",
+        status="In Progress",
         created_at=datetime(2024, 1, 1, tzinfo=UTC),
-        doers_x_periods={"alice": timedelta(days=2), "bob": timedelta(days=3)},
-        handoffs=1,
     )
-    df, handoffs = assignee_load([first, second])
-    assert list(df.columns) == ["assignee", "total_days", "issue_count"]
-    assert list(df["assignee"]) == ["alice", "bob"]
-    assert list(df["total_days"]) == [4.0, 3.0]
-    assert list(df["issue_count"]) == [2, 1]
-    assert handoffs == [2, 1]
+    assert handoffs_per_issue([passed_twice, kept]) == [2, 0]
 
 
 def test_monte_carlo_backlog_excludes_discarded_issues():

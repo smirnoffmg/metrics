@@ -139,15 +139,8 @@ def test_visservice_vis_cfd_creates_file(temp_png_file):
     assert Path(temp_png_file).exists()
 
 
-def test_visservice_vis_assignee_load_creates_file(temp_png_file):
-    df = pd.DataFrame(
-        {
-            "assignee": ["alice", "bob"],
-            "total_days": [4.0, 3.0],
-            "issue_count": [2, 1],
-        },
-    )
-    VisService().vis_assignee_load(temp_png_file, df, handoffs=[2, 1, 0])
+def test_visservice_vis_handoffs_creates_file(temp_png_file):
+    VisService().vis_handoffs(temp_png_file, [2, 1, 0])
     assert Path(temp_png_file).exists()
 
 
