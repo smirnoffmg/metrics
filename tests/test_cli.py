@@ -291,7 +291,7 @@ def test_cli_forecasts_the_scope_saved_in_a_snapshot():
         report = Path("output/report.html").read_text()
     assert "fixVersion = 7.2: 2 of 3 issues open" in result.output
     assert "at an assumed 50% of the team's pace, not checked" in result.output
-    assert "all 3 issues of the scope done (85% chance)" in report
+    assert "all 2 open issues of the scope done (85% chance)" in report
     assert "fixVersion = 7.2" in report
 
 
@@ -346,13 +346,137 @@ def test_scope_forecast_uses_scope_throughput_when_history_suffices():
     output, report = _run_release()
     # at all of the team's ten a week, all ten would be promised
     assert "Scope: at least 8 of 10 open issues done in 8 weeks (85%)" in output
-    assert "from the scope's own finishes" in output
     assert "Scope backtest: held " in output
     assert "<td>scope: open work</td>" in report
-    assert "all 42 issues of the scope done (85% chance)" in report
 
 
-def test_scope_with_six_weeks_of_finishes_is_still_forecast():
+def test_scope_headline_is_the_count_promise_and_the_date_comes_second():
+    output, report = _run_release()
+    assert (
+        "fixVersion = 7.2: 10 of 42 issues open;"
+        " at least 8 of 10 open issues done in 8 weeks (85% chance); all by "
+    ) in output
+    assert "of 10 open issues of the scope done in 8 weeks (85% chance)" in report
+    assert "issues of the scope done (85% chance)" not in report
+
+
+def test_scope_counts_issues_created_after_its_first_finish():
+    scope, issues = _release_and_team_issues()
+    for raw in scope[-3:]:
+        raw["fields"]["created"] = "2026-06-01T00:00:00.000+0000"
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=issues,
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=scope,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    assert "3 of its 42 issues were created after its first finish." in report
+    assert "3 created after its first finish" in report
+
+
+def _finished_release_snapshot():
+    """The release's last issue was done on 16 Jun 2026, three months before."""
+    scope, issues = _release_and_team_issues()
+    done = [raw for raw in scope if raw["key"] in {f"S-{week}" for week in range(20)}]
+    return Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=issues,
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=done,
+    )
+
+
+def test_a_finished_release_says_done_without_a_chance():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(_finished_release_snapshot(), Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    assert "fixVersion = 7.2: Release done: none of its 20 issues open" in (
+        result.output
+    )
+    assert "Release fixVersion = 7.2 done: none of its 20 issues open." in report
+    assert "none of its 20 issues open" in report
+    assert "nothing left to forecast" not in report
+    assert "issues of the scope done (85% chance)" not in report
+    # the report's table of its replay is printed too
+    assert "<td>scope: open work</td>" in report
+    assert "Scope backtest: held " in result.output
+
+
+def test_a_finished_release_replays_no_monday_after_it_finished(monkeypatch):
+    calls = []
+
+    def recording(*args, **kwargs):
+        calls.append(real(*args, **kwargs))
+        return calls[-1]
+
+    real = main.backtest_open_work
+    monkeypatch.setattr(main, "backtest_open_work", recording)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(_finished_release_snapshot(), Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+    # the scope is replayed last, at 4 and 8 weeks; nothing of it is open after
+    # Monday 15 Jun, though its weeks run on to the snapshot
+    origins = [result.origin for results in calls[-2:] for result in results]
+    assert origins
+    assert max(origins) == date(2026, 6, 15)
+
+
+def test_a_release_with_no_recent_finishes_says_so():
+    team = [
+        _raw_issue(
+            f"T-{week}-{n}",
+            "Done",
+            (str(date(2026, 2, 4) + timedelta(weeks=week)), "Open", "Done"),
+            resolution="Fixed",
+        )
+        for week in range(32)
+        for n in range(10)
+    ]
+    scope = [
+        _raw_issue(
+            f"S-{week}",
+            "Done",
+            (str(date(2026, 2, 3) + timedelta(weeks=week)), "Open", "Done"),
+            resolution="Fixed",
+        )
+        for week in range(16)
+    ] + [_raw_issue("S-open", "Open")]
+    for raw in team + scope:
+        raw["fields"]["created"] = "2026-02-02T00:00:00.000+0000"
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        # nothing of the team's is open, so the scope draws at the default pace
+        issues=team,
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=scope,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+    assert "1 of 17 issues open; no finishes in the recent weeks" in result.output
+    assert "not enough throughput history" not in result.output
+
+
+def test_scope_with_too_few_share_windows_promises_nothing():
     team, scope = [], []
     for week in range(30):
         tuesday = date(2026, 2, 17) + timedelta(weeks=week)
@@ -365,8 +489,9 @@ def test_scope_with_six_weeks_of_finishes_is_still_forecast():
             )
             raw["fields"]["created"] = "2026-02-02T00:00:00.000+0000"
             team.append(raw)
-    for week in range(MIN_FORECAST_HISTORY_WEEKS):
-        tuesday = date(2026, 8, 4) + timedelta(weeks=week)
+    # past the young-scope minimum, but four 4-week windows measure no share
+    for week in range(MIN_FORECAST_HISTORY_WEEKS + 2):
+        tuesday = date(2026, 7, 21) + timedelta(weeks=week)
         scope += [
             _raw_issue(
                 f"S-{week}-{n}",
@@ -393,8 +518,16 @@ def test_scope_with_six_weeks_of_finishes_is_still_forecast():
         result = runner.invoke(cli, ["--from-raw", "raw.json"])
         assert result.exit_code == 0, result.output
         report = Path("output/report.html").read_text()
-    assert "nothing left to forecast, or too little history" not in report
-    assert "10 of 28 issues open; 85% chance done by" in report
+    # all finishes going to its open issues was promised before and held 0 of 20
+    assert "Scope: at least" not in result.output
+    assert "85% chance" not in result.output.split("fixVersion = 7.2")[-1]
+    why = (
+        "no promise yet: too few past 4-week windows to measure the share of its"
+        " finishes that go to its open issues; pass --forecast-focus to assume"
+        " a share"
+    )
+    assert f"10 of 34 issues open; {why}" in result.output
+    assert f"Release fixVersion = 7.2: {why}." in report
 
 
 def test_the_scope_fan_promises_what_its_headline_does(monkeypatch):
@@ -422,7 +555,7 @@ def test_forecast_focus_given_overrides_measured_scope():
     assert "Scope backtest" not in output
 
 
-def test_scope_without_history_says_not_checked():
+def test_a_young_scope_is_not_forecast_at_the_whole_team_pace():
     scope = [
         _raw_issue("X-99", "In Progress", ("2026-09-01", "Open", "In Progress")),
         _raw_issue(
@@ -446,7 +579,14 @@ def test_scope_without_history_says_not_checked():
         save_snapshot(snapshot, Path("raw.json"))
         result = runner.invoke(cli, ["--from-raw", "raw.json"])
         assert result.exit_code == 0, result.output
-    assert "at the whole team's pace, not checked" in result.output
+        report = Path("output/report.html").read_text()
+    why = (
+        "not forecastable yet: fewer than 7 weeks of finishes;"
+        " pass --forecast-focus to assume a share"
+    )
+    assert f"fixVersion = 7.2: 1 of 2 issues open; {why}" in result.output
+    assert f"Release fixVersion = 7.2: {why}." in report
+    assert "whole team" not in result.output + report
     assert "Scope backtest" not in result.output
 
 
@@ -544,7 +684,7 @@ def _uneven_weeks_issues():
     return issues
 
 
-def _forecasts_of_a_run(monkeypatch, issues=None, scope=()):
+def _forecasts_of_a_run(monkeypatch, issues=None, scope=(), args=()):
     fans = []
 
     def recording(*args, **kwargs):
@@ -564,7 +704,7 @@ def _forecasts_of_a_run(monkeypatch, issues=None, scope=()):
     runner = CliRunner()
     with runner.isolated_filesystem():
         save_snapshot(snapshot, Path("raw.json"))
-        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        result = runner.invoke(cli, ["--from-raw", "raw.json", *args])
         assert result.exit_code == 0, result.output
     return fans, result.output
 
@@ -631,8 +771,9 @@ def _short_history_with_a_cut_first_week(weeks=MIN_FORECAST_HISTORY_WEEKS + 2):
         for n in range(1 if week == weeks - 1 else 6)
     ]
     issues += [_raw_issue(f"X-open-{n}", "Open") for n in range(60)]
+    created = date(2026, 9, 8) - timedelta(weeks=weeks)
     for raw in issues:
-        raw["fields"]["created"] = "2026-07-20T00:00:00.000+0000"
+        raw["fields"]["created"] = f"{created}T00:00:00.000+0000"
     return issues
 
 
@@ -649,8 +790,10 @@ def test_the_fan_leaves_out_the_first_week_as_its_headline_does(monkeypatch):
 
 
 def test_the_scope_fan_leaves_out_the_first_week_as_its_headline_does(monkeypatch):
+    # weeks enough for the scope's shares to be measured
     fans, output = _forecasts_of_a_run(
-        monkeypatch, scope=_short_history_with_a_cut_first_week()
+        monkeypatch,
+        scope=_short_history_with_a_cut_first_week(MIN_FORECAST_HISTORY_WEEKS + 10),
     )
     headline = re.search(
         r"Scope: at least (\d+) of \d+ open issues done in (\d+)", output
@@ -665,6 +808,7 @@ def test_a_scope_at_team_throughput_leaves_out_its_first_week(monkeypatch):
         monkeypatch,
         _short_history_with_a_cut_first_week(),
         scope=[_raw_issue(f"S-open-{n}", "Open") for n in range(60)],
+        args=("--forecast-focus", "1"),
     )
     assert fans[-1]["done_at_least_85"][3] == 4 * 6
 
@@ -745,10 +889,9 @@ def test_report_method_says_when_the_share_of_finishes_was_assumed():
         assert result.exit_code == 0, result.output
         report = Path("output/report.html").read_text()
     method = report[report.index("<details") :]
-    for subject in ("open issues", "its open issues"):
-        note = f"share of finishes going to {subject} not measured"
-        assert note in result.output
-        assert note in method
+    note = "share of finishes going to open issues not measured"
+    assert note in result.output
+    assert note in method
 
 
 def test_cli_and_report_method_warn_of_a_bulk_closure():

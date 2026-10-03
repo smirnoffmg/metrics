@@ -275,6 +275,15 @@ def weeks_to_clear(done: np.ndarray, n_open: int) -> np.ndarray:
     return np.where(cleared.any(axis=1), cleared.argmax(axis=1) + 1, done.shape[1] + 1)
 
 
+def no_recent_finishes(weekly: Sequence[float], pace: Pace) -> bool:
+    """Whether the weeks the pace draws from finished nothing, with enough of them.
+
+    monte_carlo_forecast gives nothing then too, but not for want of history.
+    """
+    samples, _ = pace_draws(weekly, pace)
+    return len(samples) >= MIN_FORECAST_HISTORY_WEEKS and samples.sum() == 0
+
+
 def monte_carlo_forecast(  # noqa: PLR0913
     issues: Sequence[Issue],
     throughput: dict[str, int],

@@ -107,11 +107,16 @@ class DateCheck:
 
 @dataclass(frozen=True)
 class DateSummary:
-    """How many past clear dates held, among those due and independent."""
+    """How many past clear dates held, among those due and independent.
+
+    not_due counts promises whose date is still ahead of the data; beyond_cap
+    those past the simulated years, which never fall due.
+    """
 
     held: int
     judged: int
     not_due: int
+    beyond_cap: int = 0
 
 
 @dataclass(frozen=True)
@@ -120,6 +125,8 @@ class ScopeResult:
 
     basis is "assumed" when the scope is paced by a share of the team's
     throughput, which nothing replays: runs and open_work are empty then.
+    why_not says why open issues got no forecast; created_after_start counts
+    the scope's issues created after its first finish.
     """
 
     forecast: dict[str, Any]
@@ -127,6 +134,8 @@ class ScopeResult:
     runs: dict[int, list[Backtest]]
     dates: DateSummary | None
     basis: Literal["measured", "assumed"]
+    why_not: str | None = None
+    created_after_start: int = 0
 
 
 @dataclass(frozen=True)
@@ -543,7 +552,8 @@ def summarize_date_checks(checks: Sequence[DateCheck], last: date) -> DateSummar
             for c in picked
         ),
         judged=len(picked),
-        not_due=len(checks) - len(due),
+        not_due=sum(c.promised is not None and c.promised > last for c in checks),
+        beyond_cap=sum(c.promised is None for c in checks),
     )
 
 

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import sys
+from dataclasses import replace
 from datetime import date, timedelta
 from functools import cache
 from pathlib import Path
@@ -98,6 +99,7 @@ from metrics.services.calculator import (
     lead_times,
     median_queue_hours,
     monte_carlo_forecast,
+    no_recent_finishes,
     queue_times,
     returns_to_testing,
     weekly_throughput,
@@ -375,7 +377,7 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     envvar="JIRA_FORECAST_JQL",
     help="JQL naming the issues to forecast, such as an epic or a release"
     " (e.g. 'fixVersion = 7.2'); paced by its own past finishes, or by the"
-    " team's when it has too few or --forecast-focus gives its share.",
+    " team's when --forecast-focus gives its share.",
 )
 @click.option(
     "--forecast-focus",
@@ -712,14 +714,9 @@ def calculate_metrics(  # noqa: PLR0913
             pace,
             forecast_focus,
         )
-        scope_forecast = scoped.forecast
         scope_open_work = scoped.open_work
-        scope_tile = scope_forecast_tile(
-            scope_forecast,
-            sum(1 for issue in scope if issue.is_open),
-            len(scope),
-            note=note,
-        )
+        scope_open = sum(1 for issue in scope if issue.is_open)
+        scope_tile = scope_forecast_tile(scoped, scope_open, len(scope), note=note)
         click.echo(title.replace("\n", ": "))
         scope_runs = _summaries(scoped.runs)
         if scope_runs:
@@ -732,18 +729,20 @@ def calculate_metrics(  # noqa: PLR0913
                 list(scope_runs.values()),
             ),
             forecast_focus,
+            open_count=scope_open,
+            total=len(scope),
         )
-        if scope_forecast:
+        if scoped.forecast:
             scope_promise = _promise(scoped.open_work)
             vis_service.vis_forecast(
                 str(output_dir / "forecast_scope.png"),
-                scope_forecast,
+                scoped.forecast,
                 title=title,
                 promise=scope_promise,
             )
             fragments.append(
                 interactive_service.forecast_fragment(
-                    scope_forecast,
+                    scoped.forecast,
                     include_js=not fragments,
                     title=title,
                     promise=scope_promise,
@@ -801,13 +800,7 @@ def calculate_metrics(  # noqa: PLR0913
         agent_comparison=comparison,
         backtests=backtests,
         used_model=used_model,
-        backtest_note=_method_note(
-            backtest_note,
-            dates,
-            open_work,
-            scope_open_work,
-            throughput,
-        ),
+        backtest_note=_method_note(backtest_note, dates, open_work, throughput),
         verdict=verdict,
         method_images=[backtest_chart] if backtest_chart else [],
         delivery_tiles=delivery_tiles,
@@ -820,18 +813,14 @@ def _method_note(
     backtest_note: str | None,
     dates: DateSummary | None,
     open_work: dict[str, Any],
-    scope_open_work: dict[str, Any],
     throughput: dict[str, int],
 ) -> str | None:
-    share_notes = (
-        ("Forecast", unmeasured_share_note(open_work, "open issues")),
-        ("Scope", unmeasured_share_note(scope_open_work, "its open issues")),
-    )
+    share_note = unmeasured_share_note(open_work, "open issues")
     parts = (
         bulk_closure_note(throughput),
         backtest_note,
         date_check_note(dates) if dates else None,
-        *(f"{label}: {note}." for label, note in share_notes if note),
+        f"Forecast: {share_note}." if share_note else None,
     )
     return " ".join(part for part in parts if part) or None
 
@@ -899,8 +888,7 @@ def _forecast(  # noqa: PLR0913
     }
     if note := unmeasured_share_note(open_work, "open issues"):
         click.echo(f"Forecast: {note}")
-    promise = promised_done(open_work, f"{open_work['n_open']} open issues")
-    click.echo(f"Forecast: {promise} in {horizon} weeks (85%)")
+    click.echo(f"Forecast: {promised_done(open_work)} in {horizon} weeks (85%)")
     checked = _report_backtest(
         open_work,
         model,
@@ -1158,35 +1146,88 @@ def _forecast_scope(  # noqa: PLR0913
 
     Returns the result, a one-line summary and what the forecast rests on.
     Unless a focus is given, the scope is paced by its own finishes, which
-    already leave out the time the team spent on other work.
+    already leave out the time the team spent on other work; with too few of
+    them it is not forecast, since the whole team's pace held 2 of 62 dates.
     """
     throughput = weekly_throughput(scope, now=now)
+    open_count = sum(1 for issue in scope if issue.is_open)
+    note = "from the scope's own finishes"
     # _measured_scope drops the first week, so it needs one beyond the minimum
     if focus is None and len(throughput) > MIN_FORECAST_HISTORY_WEEKS:
         result = _measured_scope(scope, scope_moment_at, throughput, now, pace)
-        note = "from the scope's own finishes"
+    elif focus is None:
+        result = ScopeResult(
+            {},
+            {},
+            {},
+            None,
+            "measured",
+            why_not="not forecastable yet: fewer than"
+            f" {MIN_FORECAST_HISTORY_WEEKS + 1} weeks of finishes;"
+            " pass --forecast-focus to assume a share",
+        )
     else:
+        # as in _forecast: the first week may predate the query's window
+        history = dict(list(team_throughput.items())[1:])
         forecast = monte_carlo_forecast(
             scope,
-            # as in _forecast: the first week may predate the query's window
-            dict(list(team_throughput.items())[1:]),
+            history,
             seed=BACKTEST_SEED,
             now=now,
-            focus=focus or 1.0,
+            focus=focus,
             pace=pace,
         )
-        result = ScopeResult(forecast, {}, {}, None, "assumed")
+        why_not = None
+        if open_count and not forecast:
+            why_not = _no_forecast_reason(list(history.values()), pace)
+        result = ScopeResult(forecast, {}, {}, None, "assumed", why_not=why_not)
         note = assumed_pace_note(focus)
-    open_count = sum(1 for issue in scope if issue.is_open)
+    if throughput and open_count:
+        first_finish = min(
+            issue.last_finish_status_at
+            for issue in scope
+            if issue.last_finish_status_at is not None
+        )
+        result = replace(
+            result,
+            created_after_start=sum(issue.created_at > first_finish for issue in scope),
+        )
+    return result, _scope_summary(jql, result, open_count, len(scope), note), note
+
+
+def _scope_summary(
+    jql: str,
+    result: ScopeResult,
+    open_count: int,
+    total: int,
+    note: str,
+) -> str:
     # the query on its own line: a chart title cannot fit a long one beside the rest
-    summary = f"{jql}\n{open_count} of {len(scope)} issues open"
-    if result.forecast and result.forecast["p85_date"] is None:
-        summary += f"; not within 2 years {note}"
-    elif result.forecast:
-        summary += f"; 85% chance done by {result.forecast['p85_date']:%d %b %Y} {note}"
-    elif open_count:
-        summary += "; not enough throughput history to forecast"
-    return result, summary, note
+    if open_count == 0:
+        return f"{jql}\nRelease done: none of its {total} issues open"
+    summary = f"{jql}\n{open_count} of {total} issues open"
+    forecast, open_work = result.forecast, result.open_work
+    if result.why_not or not forecast:
+        return f"{summary}; {result.why_not or 'not enough throughput history'}"
+    if not open_work and forecast["p85_date"] is None:
+        return f"{summary}; not within 2 years {note}"
+    if not open_work:
+        return f"{summary}; 85% chance done by {forecast['p85_date']:%d %b %Y} {note}"
+    all_done = (
+        "not all within 2 years"
+        if forecast["p85_date"] is None
+        else f"all by {forecast['p85_date']:%d %b %Y}"
+    )
+    return (
+        f"{summary}; {promised_done(open_work)} in {open_work['horizon']}"
+        f" weeks (85% chance); {all_done}"
+    )
+
+
+def _no_forecast_reason(weekly: list[int], pace: Pace) -> str:
+    if no_recent_finishes(weekly, pace):
+        return "no finishes in the recent weeks"
+    return "not enough throughput history"
 
 
 def _measured_scope(
@@ -1209,12 +1250,31 @@ def _measured_scope(
         for horizon in SHORT_HORIZONS_WEEKS
     }
     summaries = _summaries(runs)
+    for h, summary in summaries.items():
+        click.echo(
+            f"Scope backtest: held {summary.held_independent} of"
+            f" {summary.independent} independent {h}-week promises"
+            f" ({summary.held_85:.0%} of {summary.count} past forecasts)",
+        )
+    if not summaries:
+        click.echo("Scope backtest: too little history to replay the forecast")
+    if not any(issue.is_open for issue in scope):
+        return ScopeResult({}, {}, runs, None, "measured")
     judged = judged_summary(list(summaries.values()))
     horizon = judged.horizon if judged is not None else SHORT_HORIZONS_WEEKS[0]
     shares = past_shares(moment_at, weeks, until=len(weeks), horizon=horizon)
-    measured = len(shares) >= MIN_SHARE_WINDOWS
-    if not measured:
-        shares = [1.0]
+    if len(shares) < MIN_SHARE_WINDOWS:
+        # all finishes going to the open issues was promised before: it held 0 of 20
+        return ScopeResult(
+            {},
+            {},
+            runs,
+            None,
+            "measured",
+            why_not=f"no promise yet: too few past {horizon}-week windows to"
+            " measure the share of its finishes that go to its open issues;"
+            " pass --forecast-focus to assume a share",
+        )
     # the first week starts at the scope's first finish, so it is only partly counted
     history = dict(list(throughput.items())[1:])
     forecast = monte_carlo_forecast(
@@ -1228,32 +1288,19 @@ def _measured_scope(
         shares=shares,
     )
     if not forecast:
-        return ScopeResult(forecast, {}, runs, None, "measured")
-    open_work = {
-        **forecast_open_work(
-            forecast["backlog"],
-            list(history.values()),
-            shares,
-            horizon=horizon,
-            pace=pace,
-            past_us=None,
-            now=now,
-            seed=BACKTEST_SEED,
-        ),
-        "share_measured": measured,
-    }
-    if note := unmeasured_share_note(open_work, "its open issues"):
-        click.echo(f"Scope: {note}")
-    promise = promised_done(open_work, f"{open_work['n_open']} open issues")
-    click.echo(f"Scope: {promise} in {horizon} weeks (85%)")
-    for h, summary in summaries.items():
-        click.echo(
-            f"Scope backtest: held {summary.held_independent} of"
-            f" {summary.independent} independent {h}-week promises"
-            f" ({summary.held_85:.0%} of {summary.count} past forecasts)",
-        )
-    if not summaries:
-        click.echo("Scope backtest: too little history to replay the forecast")
+        why_not = _no_forecast_reason(list(history.values()), pace)
+        return ScopeResult(forecast, {}, runs, None, "measured", why_not=why_not)
+    open_work = forecast_open_work(
+        forecast["backlog"],
+        list(history.values()),
+        shares,
+        horizon=horizon,
+        pace=pace,
+        past_us=None,
+        now=now,
+        seed=BACKTEST_SEED,
+    )
+    click.echo(f"Scope: {promised_done(open_work)} in {horizon} weeks (85%)")
     dates = _date_summary(moment_at, weeks, horizon, pace)
     click.echo(f"Scope: {date_check_note(dates)}")
     return ScopeResult(forecast, open_work, runs, dates, "measured")

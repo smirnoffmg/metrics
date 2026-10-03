@@ -790,8 +790,9 @@ def test_date_promises_counted_only_when_intervals_do_not_overlap():
         check(12, None, None),
     ]
     summary = summarize_date_checks(checks, last=MONDAY + timedelta(weeks=20))
-    # due and apart: weeks 0..5, 5..9 and 10..12; the last two are not due
-    assert summary == DateSummary(held=2, judged=3, not_due=2)
+    # due and apart: weeks 0..5, 5..9 and 10..12; week 30 is not due yet, and
+    # a promise past the cap never falls due
+    assert summary == DateSummary(held=2, judged=3, not_due=1, beyond_cap=1)
 
 
 def test_no_date_promise_when_list_does_not_clear_within_cap():

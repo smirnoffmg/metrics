@@ -128,35 +128,70 @@ def test_build_stuck_rows_empty():
     assert build_stuck_rows(empty, "https://x") == []
 
 
-def test_build_headline_tiles_puts_the_scope_after_the_date():
-    scope = scope_forecast_tile(
-        {"p85": 3.0, "p85_date": date(2024, 2, 1)}, open_count=4, total=6
+def _measured_scope(**changes) -> ScopeResult:
+    scope = ScopeResult(
+        {"backlog": 4, "p85": 3.0, "p85_date": date(2024, 2, 1)},
+        _open_work(n_open=4, at_least_85=2.0),
+        {},
+        None,
+        "measured",
     )
+    return replace(scope, **changes)
+
+
+def test_build_headline_tiles_puts_the_scope_after_the_date():
     tiles = build_headline_tiles(
         scatter=_scatter_df(),
         aging=_aging_df(),
         open_work={},
         forecast={},
         flow_efficiency=0.0,
-        scope_tile=scope,
+        scope_tile=scope_forecast_tile(_measured_scope(), open_count=4, total=6),
     )
+    # the same count promise as the team's, the all-done date only beside it
     assert tiles[3] == Tile(
-        "all 6 issues of the scope done (85% chance)", "by 01 Feb 2024"
+        "of 4 open issues of the scope done in 8 weeks (85% chance)",
+        "≥ 2",
+        "all by 01 Feb 2024",
     )
 
 
-def test_scope_forecast_tile_says_when_nothing_is_left():
-    assert scope_forecast_tile({}, open_count=0, total=2) == Tile(
-        "all 2 issues of the scope done (85% chance)", "all done"
+def test_scope_forecast_tile_says_a_finished_release_is_done_without_a_chance():
+    finished = ScopeResult({}, {}, {}, None, "measured")
+    assert scope_forecast_tile(finished, open_count=0, total=2) == Tile(
+        "none of its 2 issues open", "Release done"
     )
-    assert scope_forecast_tile({}, open_count=3, total=3).value == "n/a"
+
+
+def test_scope_forecast_tile_counts_the_open_issue_and_late_additions():
+    one_open = _measured_scope(
+        forecast={"backlog": 1, "p85": None, "p85_date": None},
+        open_work=_open_work(n_open=1, at_least_85=0.0),
+        created_after_start=3,
+    )
+    tile = scope_forecast_tile(one_open, open_count=1, total=263)
+    assert tile.label == "of 1 open issue of the scope done in 8 weeks (85% chance)"
+    assert tile.delta_text == (
+        "not all within 2 years; 3 created after its first finish"
+    )
+
+
+def test_scope_forecast_tile_says_why_there_is_no_forecast():
+    young = ScopeResult({}, {}, {}, None, "measured", why_not="not forecastable yet")
+    assert scope_forecast_tile(young, open_count=3, total=3) == Tile(
+        "3 open issues of the scope", "n/a", "not forecastable yet"
+    )
 
 
 def test_scope_forecast_tile_says_how_far_it_was_checked():
-    forecast = {"p85": 3.0, "p85_date": date(2024, 2, 1)}
-    tile = scope_forecast_tile(forecast, 4, 6, note="assumed, not checked")
-    assert tile.delta_text == "assumed, not checked"
-    assert tile.delta_good is None
+    forecast = {"backlog": 4, "p85": 3.0, "p85_date": date(2024, 2, 1)}
+    assumed = ScopeResult(forecast, {}, {}, None, "assumed")
+    tile = scope_forecast_tile(assumed, 4, 6, note="assumed, not checked")
+    assert tile == Tile(
+        "all 4 open issues of the scope done (85% chance)",
+        "by 01 Feb 2024",
+        "assumed, not checked",
+    )
 
 
 def test_build_headline_tiles_leave_out_the_scope_tile_without_a_scope():
@@ -374,10 +409,11 @@ def test_recalibration_note_when_the_correction_scores_better():
     )
 
 
-def test_date_check_note_says_none_judged_while_promises_are_not_due():
-    note = date_check_note(DateSummary(held=0, judged=0, not_due=74))
+def test_date_check_note_tells_promises_past_the_cap_from_those_not_yet_due():
+    note = date_check_note(DateSummary(held=0, judged=0, not_due=3, beyond_cap=87))
     assert note == (
-        "Clear dates: 0 judged; all 74 past promises fall beyond the data so far."
+        "Clear dates: none of 90 past promises judged; 3 not yet due,"
+        " 87 past the 2-year cap and never due."
     )
 
 
@@ -385,6 +421,14 @@ def test_date_check_note_reads_held_of_judged():
     note = date_check_note(DateSummary(held=3, judged=4, not_due=10))
     assert note == (
         "Clear dates: held 3 of 4 independent past promises; 10 not yet due."
+    )
+
+
+def test_date_check_note_counts_one_promise_in_the_singular():
+    note = date_check_note(DateSummary(held=0, judged=0, not_due=0, beyond_cap=1))
+    assert note == (
+        "Clear dates: none of 1 past promise judged;"
+        " 1 past the 2-year cap and never due."
     )
 
 
@@ -545,6 +589,8 @@ def test_verdict_has_no_method_jargon():
                 "measured",
             ),
             Trust("holds", 11, 12),
+            open_count=10,
+            total=42,
         ),
     )
     text = " ".join(" ".join(verdict) for verdict in verdicts)
@@ -563,6 +609,8 @@ def test_scope_verdict_reads_the_release_date_and_its_trust():
             "measured",
         ),
         Trust("holds", 11, 12),
+        open_count=10,
+        total=42,
     )
     assert verdict[0] == (
         "Release fixVersion = 7.2: at least 8 of its 10 open issues done"
@@ -586,6 +634,8 @@ def test_scope_verdict_does_not_lend_the_replayed_trust_to_its_date():
             "measured",
         ),
         Trust("holds", 11, 12),
+        open_count=10,
+        total=42,
     )
     promise, trusted, date_line = verdict
     # the trust sentence follows the replayed promise, never the extrapolated date
@@ -596,23 +646,67 @@ def test_scope_verdict_does_not_lend_the_replayed_trust_to_its_date():
     assert "no past date like it has come due" in date_line
 
 
-def test_scope_verdict_without_a_focus_says_the_whole_team_pace_is_not_checked():
-    # no --forecast-focus: the whole team's pace is used, and no share was assumed
+def test_scope_verdict_says_a_finished_release_is_done_without_a_chance():
+    verdict = scope_verdict(
+        "fixVersion = 7.2",
+        ScopeResult({}, {}, {}, None, "measured"),
+        trust(None),
+        open_count=0,
+        total=65,
+    )
+    assert verdict == ["Release fixVersion = 7.2 done: none of its 65 issues open."]
+
+
+def test_scope_verdict_says_why_there_is_no_forecast():
+    verdict = scope_verdict(
+        "fixVersion = 7.2",
+        ScopeResult({}, {}, {}, None, "measured", why_not="not forecastable yet"),
+        trust(None),
+        open_count=3,
+        total=3,
+    )
+    assert verdict == ["Release fixVersion = 7.2: not forecastable yet."]
+
+
+def test_scope_verdict_reads_one_open_issue_in_the_singular():
     verdict = scope_verdict(
         "fixVersion = 7.2",
         ScopeResult(
-            _dated_forecast(backlog=10, p85=None, p85_date=None),
-            {},
+            _dated_forecast(backlog=1, p85=None, p85_date=None),
+            _open_work(n_open=1, at_least_85=0.0),
             {},
             None,
-            "assumed",
+            "measured",
         ),
-        trust(None),
+        Trust("unchecked", 1, 1),
+        open_count=1,
+        total=167,
     )
-    assert verdict == [
-        "Release fixVersion = 7.2: not all 10 open issues done within 2 years"
-        " (85% chance), at the whole team's pace, not checked.",
-    ]
+    assert verdict[0].startswith(
+        "Release fixVersion = 7.2: the 1 open issue cannot be promised done in 8 weeks"
+    )
+    assert "1 past 8-week promise could be replayed" in verdict[1]
+    assert verdict[2].startswith(
+        "The 1 open issue will not be done within 2 years at this pace"
+    )
+
+
+def test_scope_verdict_counts_issues_created_after_its_first_finish():
+    verdict = scope_verdict(
+        "fixVersion = 7.2",
+        ScopeResult(
+            _dated_forecast(backlog=10),
+            _open_work(n_open=10, at_least_85=8.0),
+            {},
+            None,
+            "measured",
+            created_after_start=3,
+        ),
+        Trust("holds", 11, 12),
+        open_count=10,
+        total=42,
+    )
+    assert verdict[-1] == "3 of its 42 issues were created after its first finish."
 
 
 def test_forecast_verdict_puts_the_release_before_the_action():
@@ -676,6 +770,8 @@ def test_scope_verdict_names_the_assumed_focus_once():
         ),
         trust(None),
         focus=0.5,
+        open_count=10,
+        total=42,
     )
     assert verdict == [
         "Release fixVersion = 7.2: all 10 open issues done by 01 Jul 2024"
@@ -684,7 +780,6 @@ def test_scope_verdict_names_the_assumed_focus_once():
 
 
 def test_assumed_pace_note_matches_the_verdict():
-    assert assumed_pace_note(None) == "at the whole team's pace, not checked"
     assert assumed_pace_note(0.4) == (
         "at an assumed 40% of the team's pace, not checked"
     )
@@ -788,6 +883,8 @@ def test_scope_verdict_says_none_can_be_promised_for_at_least_zero():
             "measured",
         ),
         Trust("unchecked", 0, 0),
+        open_count=10,
+        total=42,
     )
     assert verdict[0] == (
         "Release fixVersion = 7.2: none of its 10 open issues can be promised done"
@@ -888,11 +985,18 @@ def test_forecast_verdict_names_the_shorter_horizon_that_rejects_it():
 
 
 def test_promised_done_says_none_for_at_least_zero():
-    assert promised_done(_open_work(), "151 open issues") == (
-        "at least 31 of 151 open issues done"
+    assert promised_done(_open_work()) == "at least 31 of 151 open issues done"
+    assert promised_done(_open_work(at_least_85=0.0), "its ") == (
+        "none of its 151 open issues can be promised done"
     )
-    assert promised_done(_open_work(at_least_85=0.0), "its 1 open issues") == (
-        "none of its 1 open issues can be promised done"
+
+
+def test_promised_done_names_one_open_issue_in_the_singular():
+    assert promised_done(_open_work(n_open=1, at_least_85=0.0), "its ") == (
+        "the 1 open issue cannot be promised done"
+    )
+    assert promised_done(_open_work(n_open=1, at_least_85=1.0)) == (
+        "the 1 open issue done"
     )
 
 

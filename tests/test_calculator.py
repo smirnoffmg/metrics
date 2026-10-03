@@ -23,6 +23,7 @@ from metrics.services.calculator import (
     lead_times,
     median_queue_hours,
     monte_carlo_forecast,
+    no_recent_finishes,
     pace_draws,
     queue_times,
     returns_to_testing,
@@ -471,6 +472,14 @@ def test_time_metrics_keep_the_tail_of_the_distribution():
     assert cycle_times(issues) == [59, 30]
     assert lead_times(issues) == [59, 30]
     assert queue_times(issues) == {"In Progress": [59, 30]}
+
+
+def test_no_recent_finishes_tells_a_silent_window_from_a_short_history():
+    weekly = [5] * 20 + [0] * 12
+    assert no_recent_finishes(weekly, Pace(window=12))
+    assert not no_recent_finishes(weekly, Pace(window=26))
+    # too few weeks to forecast at all is a different reason
+    assert not no_recent_finishes([0, 0], Pace(window=12))
 
 
 def test_monte_carlo_forecast_draws_from_the_window_of_recent_weeks():

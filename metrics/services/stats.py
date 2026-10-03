@@ -166,18 +166,40 @@ def flow_tile(flow: BacklogFlow | None) -> Tile:
 
 
 def scope_forecast_tile(
-    forecast: dict[str, Any],
+    scope: ScopeResult,
     open_count: int,
     total: int,
     *,
     note: str | None = None,
 ) -> Tile:
-    """Headline tile for the forecast query's issues; note says what it rests on."""
-    label = f"all {total} issues of the scope done (85% chance)"
+    """Headline tile for the forecast query's issues; note says what it rests on.
+
+    Paced by its own finishes, it promises a count as the team's tile does;
+    stragglers can push out the date all of them are done, so it comes second.
+    """
     if open_count == 0:
-        return Tile(label, "all done")
-    tile = _forecast_tile(forecast, label)
-    return Tile(tile.label, tile.value, note)
+        return Tile(f"none of its {total} issues open", "Release done")
+    if scope.why_not:
+        return Tile(f"{_open_issues(open_count)} of the scope", "n/a", scope.why_not)
+    open_work = scope.open_work
+    if not open_work:
+        label = f"all {_open_issues(open_count)} of the scope done (85% chance)"
+        tile = _forecast_tile(scope.forecast, label)
+        return Tile(tile.label, tile.value, note)
+    forecast = scope.forecast
+    all_done = (
+        "not all within 2 years"
+        if forecast["p85_date"] is None
+        else f"all by {forecast['p85_date']:%d %b %Y}"
+    )
+    if scope.created_after_start:
+        all_done += f"; {scope.created_after_start} created after its first finish"
+    return Tile(
+        f"of {_open_issues(open_work['n_open'])} of the scope done"
+        f" in {open_work['horizon']} weeks (85% chance)",
+        f"≥ {open_work['at_least_85']:.0f}",
+        all_done,
+    )
 
 
 def backtest_tile(summary: BacktestSummary | None) -> Tile:
@@ -360,23 +382,30 @@ def _trust_sentence(trust: Trust, horizon: int) -> str:
         )
     return (
         f"There is too little history to check it: {trust.of} past"
-        f" {horizon}-week promises could be replayed without overlap."
+        f" {horizon}-week {_plural(trust.of, 'promise')} could be replayed"
+        " without overlap."
     )
 
 
 def _clear_date_sentence(
     forecast: dict[str, Any],
     dates: DateSummary | None,
-    issues: str = "open issues",
+    whose: str = "",
 ) -> str:
-    if forecast["p85_date"] is None:
+    n = forecast["backlog"]
+    if n == 1 and forecast["p85_date"] is None:
+        sentence = "The 1 open issue will not be done within 2 years at this pace"
+    elif n == 1:
         sentence = (
-            f"Not all {forecast['backlog']} {issues} will be done"
-            " within 2 years at this pace"
+            f"The 1 open issue done by {forecast['p85_date']:%d %b %Y} (85% chance)"
+        )
+    elif forecast["p85_date"] is None:
+        sentence = (
+            f"Not all {n} {whose}open issues will be done within 2 years at this pace"
         )
     else:
         sentence = (
-            f"All {forecast['backlog']} {issues} done"
+            f"All {n} {whose}open issues done"
             f" by {forecast['p85_date']:%d %b %Y} (85% chance)"
         )
     if dates is not None and not _held_as_promised(dates.held, dates.judged):
@@ -396,52 +425,76 @@ def _clear_date_sentence(
     return f"{sentence}; no past date like it has come due to check it."
 
 
-def promised_done(open_work: dict[str, Any], issues: str) -> str:
-    """At least how many of the issues get done, or that none can be promised."""
+def promised_done(open_work: dict[str, Any], whose: str = "") -> str:
+    """At least how many of the open issues get done, or that none can be promised.
+
+    whose, such as "its ", goes before the count of open issues.
+    """
+    n = open_work["n_open"]
+    if n == 1:
+        verb = "done" if open_work["at_least_85"] else "cannot be promised done"
+        return f"the 1 open issue {verb}"
     if not open_work["at_least_85"]:
-        return f"none of {issues} can be promised done"
-    return f"at least {open_work['at_least_85']:.0f} of {issues} done"
+        return f"none of {whose}{n} open issues can be promised done"
+    return f"at least {open_work['at_least_85']:.0f} of {whose}{n} open issues done"
 
 
-def assumed_pace_note(focus: float | None) -> str:
+def assumed_pace_note(focus: float) -> str:
     """Say what a scope forecast not paced by its own finishes rests on."""
-    if focus is None:
-        return "at the whole team's pace, not checked"
     return f"at an assumed {focus:.0%} of the team's pace, not checked"
 
 
-def scope_verdict(
+def scope_verdict(  # noqa: PLR0913
     jql: str,
     scope: ScopeResult,
     trust: Trust,
     focus: float | None = None,
+    *,
+    open_count: int,
+    total: int,
 ) -> list[str]:
     """Say when the release a forecast query names gets done, and what that rests on.
 
-    focus is the share of the team's pace assumed for the release, if given.
+    focus is the share of the team's pace assumed for the release, if given;
+    open_count and total count its issues open now and all of them.
     """
+    if open_count == 0:
+        return [f"Release {jql} done: none of its {total} issues open."]
     forecast = scope.forecast
-    if not forecast:
-        return [f"Release {jql}: nothing left to forecast, or too little history."]
+    if scope.why_not or not forecast:
+        return [f"Release {jql}: {scope.why_not or 'too little history'}."]
     open_work = scope.open_work
     if scope.basis == "measured" and open_work:
         # the trust is earned by replaying the H-week promise, so it must follow
         # that promise; the clear date gets its own, separate check
-        promise = promised_done(open_work, f"its {open_work['n_open']} open issues")
-        return [
-            f"Release {jql}: {promise} in {open_work['horizon']}"
-            f" weeks, by {open_work['by_date']:%d %b %Y} (85% chance),"
-            " paced by its own finishes.",
+        verdict = [
+            f"Release {jql}: {promised_done(open_work, 'its ')} in"
+            f" {open_work['horizon']} weeks, by {open_work['by_date']:%d %b %Y}"
+            " (85% chance), paced by its own finishes.",
             _trust_sentence(trust, open_work["horizon"]),
-            _clear_date_sentence(forecast, scope.dates, "of its open issues"),
+            _clear_date_sentence(forecast, scope.dates, "of its "),
         ]
+        if scope.created_after_start:
+            verdict.append(
+                f"{scope.created_after_start} of its {total} issues were created"
+                " after its first finish.",
+            )
+        return verdict
     done = (
-        f"not all {forecast['backlog']} open issues done within 2 years"
+        f"not all {_open_issues(forecast['backlog'])} done within 2 years"
         if forecast["p85_date"] is None
-        else f"all {forecast['backlog']} open issues done"
+        else f"all {_open_issues(forecast['backlog'])} done"
         f" by {forecast['p85_date']:%d %b %Y}"
     )
-    return [f"Release {jql}: {done} (85% chance), {assumed_pace_note(focus)}."]
+    return [f"Release {jql}: {done} (85% chance), {assumed_pace_note(focus or 1.0)}."]
+
+
+def _open_issues(n: int) -> str:
+    return f"{n} open {_plural(n, 'issue')}"
+
+
+def _plural(n: int, word: str) -> str:
+    return word if n == 1 else f"{word}s"
 
 
 def diagnose_backtest(summaries: Sequence[BacktestSummary]) -> str:
@@ -500,16 +553,29 @@ def recalibration_note(raw: BacktestSummary, recalibrated: BacktestSummary) -> s
 
 
 def date_check_note(summary: DateSummary) -> str:
-    """Say how past clear-date promises held, or that none has fallen due."""
+    """Say how past clear-date promises held, and why the others were not judged.
+
+    A promise past the cap never falls due, while one not yet due still may.
+    """
+    unjudged = [
+        *([f"{summary.not_due} not yet due"] if summary.not_due else []),
+        *(
+            [f"{summary.beyond_cap} past the 2-year cap and never due"]
+            if summary.beyond_cap
+            else []
+        ),
+    ]
+    rest = f"; {', '.join(unjudged)}." if unjudged else "."
     if summary.judged:
         return (
             f"Clear dates: held {summary.held} of {summary.judged} independent"
-            f" past promises; {summary.not_due} not yet due."
+            f" past {_plural(summary.judged, 'promise')}{rest}"
         )
-    if summary.not_due:
+    if unjudged:
+        total = summary.not_due + summary.beyond_cap
         return (
-            f"Clear dates: 0 judged; all {summary.not_due} past promises"
-            " fall beyond the data so far."
+            f"Clear dates: none of {total} past {_plural(total, 'promise')}"
+            f" judged{rest}"
         )
     return "Clear dates: too little history to replay past promises."
 
