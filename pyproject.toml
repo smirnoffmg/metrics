@@ -1,7 +1,7 @@
 [project]
 name = "metrics"
 version = "0.1.0"
-description = "Jira engineering analytics: cycle/lead/queue time, throughput, and return-to-testing charts"
+description = "A Jira delivery forecast that honestly says how far you can trust it"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Maksim Smirnov", email = "smirnoffmg@gmail.com" }]
