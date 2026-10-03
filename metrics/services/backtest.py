@@ -136,10 +136,14 @@ class Moment:
     done_keys: frozenset[str]
 
 
-def moment_of(issues: Sequence[Issue], at: datetime) -> Moment:
+def moment_of(
+    issues: Sequence[Issue],
+    at: datetime,
+    since: date | None = None,
+) -> Moment:
     """Keep what the open-work backtest needs of issues as they were at a moment."""
     return Moment(
-        throughput=weekly_throughput(issues, now=at),
+        throughput=weekly_throughput(issues, now=at, since=since),
         open_keys=frozenset(issue.key for issue in issues if issue.is_open),
         done_keys=frozenset(issue.key for issue in issues if issue.was_done),
     )

@@ -19,6 +19,7 @@ from metrics.services.calculator import (
     cycle_times,
     flow_efficiency,
     handoffs_per_issue,
+    history_start,
     lead_times,
     median_queue_hours,
     monte_carlo_forecast,
@@ -106,6 +107,42 @@ def test_throughput_counts_idle_weeks_up_to_now():
         ("2024W03", 0),
         ("2024W04", 0),
     ]
+
+
+def test_throughput_since_a_day_leaves_out_earlier_finishes():
+    issues = _finished_on(
+        datetime(2017, 12, 5, tzinfo=UTC),
+        datetime(2024, 1, 10, tzinfo=UTC),
+    )
+    result = weekly_throughput(
+        issues,
+        now=datetime(2024, 1, 22, tzinfo=UTC),
+        since=date(2024, 1, 3),
+    )
+    assert list(result.items()) == [("2024W01", 0), ("2024W02", 1), ("2024W03", 0)]
+
+
+def test_history_starts_at_the_earliest_resolution_date():
+    closed_unresolved, resolved, later = _finished_on(
+        datetime(2017, 12, 5, 9, tzinfo=UTC),
+        datetime(2024, 10, 3, 9, tzinfo=UTC),
+        datetime(2025, 1, 6, tzinfo=UTC),
+    )
+    resolved.resolved_at = datetime(2024, 10, 3, 9, tzinfo=UTC)
+    later.resolved_at = datetime(2025, 1, 6, tzinfo=UTC)
+    issues = [closed_unresolved, resolved, later]
+    assert history_start(issues) == date(2024, 10, 3)
+
+
+def test_history_start_ignores_a_done_status_older_than_its_resolution():
+    # HHH-14498: Resolved in 2021, bulk-closed with resolution Fixed in 2024
+    bulk_closed, resolved = _finished_on(
+        datetime(2021, 3, 15, tzinfo=UTC),
+        datetime(2024, 10, 3, 9, tzinfo=UTC),
+    )
+    bulk_closed.resolved_at = datetime(2024, 12, 3, tzinfo=UTC)
+    resolved.resolved_at = datetime(2024, 10, 3, 9, tzinfo=UTC)
+    assert history_start([bulk_closed, resolved]) == date(2024, 10, 3)
 
 
 def test_weekly_throughput_without_issues():
@@ -519,6 +556,23 @@ def test_burndown_scales_throughput_by_share():
         simulations=10,
     )
     assert done[0].tolist() == [2, 4, 6, 8, 10]
+
+
+def test_burndown_draws_shares_from_the_paces_recent_windows():
+    def done(pace):
+        return burndown(
+            100,
+            [4] * 30,
+            np.random.default_rng(1),
+            weeks=1,
+            pace=pace,
+            shares=(0.0,) * 20 + (1.0,) * 12,
+            simulations=200,
+        )
+
+    assert (done(Pace(window=12)) == 4).all()  # noqa: PLR2004
+    assert (done(Pace(half_life=1)) == 4).mean() > 0.99  # noqa: PLR2004
+    assert (done(Pace(window=52)) == 0).any()
 
 
 def test_weeks_to_clear_marks_runs_that_never_clear_past_the_last_week():

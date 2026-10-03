@@ -72,6 +72,7 @@ class JiraDataConverter:
             started_at=changelog_data["started_at"],
             last_finish_status_at=changelog_data["last_finish_status_at"],
             discarded=changelog_data["discarded"],
+            resolved_at=self._resolved_at(data_item["fields"]),
             in_backlog=self._is_backlog(
                 status["name"].lower(),
                 (status_categories or {}).get(status.get("id") or ""),
@@ -80,6 +81,12 @@ class JiraDataConverter:
             status_transitions=changelog_data["status_transitions"],
             handoffs=changelog_data["handoffs"],
         )
+
+    @staticmethod
+    def _resolved_at(fields: dict) -> datetime | None:
+        # a rewound issue drops its resolution but keeps today's resolutiondate
+        stamp = fields.get("resolutiondate")
+        return parse_timestamp(stamp) if stamp and fields.get("resolution") else None
 
     def _parse_changelog_item(
         self,

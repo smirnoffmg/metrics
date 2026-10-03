@@ -111,6 +111,9 @@ def _raw_issue(key, status, *steps, resolution=None):
             "created": "2026-06-01T00:00:00.000+0000",
             "status": {"name": status},
             "resolution": {"name": resolution} if resolution else None,
+            "resolutiondate": (
+                f"{steps[-1][0]}T00:00:00.000+0000" if resolution and steps else None
+            ),
             "assignee": {"displayName": "alice"},
         },
         "changelog": {
@@ -564,6 +567,33 @@ def _forecasts_of_a_run(monkeypatch, issues=None, scope=()):
         result = runner.invoke(cli, ["--from-raw", "raw.json"])
         assert result.exit_code == 0, result.output
     return fans, result.output
+
+
+def test_an_old_issue_closed_without_resolution_does_not_stretch_the_history(
+    monkeypatch,
+):
+    histories = []
+
+    def recording(issues, throughput, *args, **kwargs):
+        histories.append(throughput)
+        return real(issues, throughput, *args, **kwargs)
+
+    real = main.monte_carlo_forecast
+    monkeypatch.setattr(main, "monte_carlo_forecast", recording)
+    closed_long_ago = _raw_issue("X-old", "Closed", ("2021-09-07", "Open", "Closed"))
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X AND (resolved >= -730d OR resolution = Unresolved)",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=[*_uneven_weeks_issues(), closed_long_ago],
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+    # the first resolved finish is in 2026W06, a week the forecast leaves out
+    assert next(iter(histories[0])) == "2026W07"
 
 
 def test_two_runs_from_the_same_snapshot_forecast_the_same(monkeypatch):

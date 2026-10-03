@@ -804,3 +804,25 @@ def test_no_date_promise_when_list_does_not_clear_within_cap():
     checks = _checks(_moment_known_at(world), 30, max_weeks=20)
     assert checks
     assert all(check.promised is None for check in checks)
+
+
+def test_moment_of_counts_throughput_since_the_history_start():
+    issues = [
+        Issue(
+            key=f"DONE-{day.year}",
+            status="Done",
+            created_at=day - timedelta(days=1),
+            last_finish_status_at=day,
+        )
+        for day in (
+            datetime(2017, 12, 5, tzinfo=UTC),
+            datetime(2024, 1, 10, tzinfo=UTC),
+        )
+    ]
+    moment = moment_of(
+        issues,
+        datetime(2024, 1, 22, tzinfo=UTC),
+        since=date(2024, 1, 3),
+    )
+    assert list(moment.throughput) == ["2024W01", "2024W02", "2024W03"]
+    assert moment.done_keys == {"DONE-2017", "DONE-2024"}

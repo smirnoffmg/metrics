@@ -460,6 +460,22 @@ def test_converter_closed_as_fixed_stays_done():
     assert not issue.discarded
 
 
+def test_converter_records_when_jira_resolved_the_issue():
+    def converted(resolution, resolved_on):
+        data_item = _issue_moving_through(
+            ("2024-01-05", "Open", "Closed"),
+            resolution=resolution,
+        )
+        data_item["fields"]["resolutiondate"] = resolved_on
+        return JiraDataConverter().convert_data_to_issue(data_item)
+
+    resolved = converted("Fixed", "2024-03-07T10:00:00.000+0000")
+    assert resolved.resolved_at == datetime(2024, 3, 7, 10, tzinfo=UTC)
+    assert converted("Fixed", None).resolved_at is None
+    # a rewound issue loses its resolution but keeps today's resolution date
+    assert converted(None, "2024-03-07T10:00:00.000+0000").resolved_at is None
+
+
 def test_converter_accepts_custom_discarded_resolutions():
     data_item = _issue_moving_through(
         ("2024-01-05", "Open", "Done"),

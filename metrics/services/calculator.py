@@ -101,18 +101,33 @@ def queue_times(
 def weekly_throughput(
     issues: Sequence[Issue],
     now: datetime | None = None,
+    since: date | None = None,
 ) -> dict[str, int]:
     """Count issues completed per finished ISO week, up to the one before now.
 
     The current week is left out, since a partial week reads as a slump;
-    weeks with no completions up to now count as zero.
+    weeks with no completions up to now count as zero. Given since, weeks
+    run from its week and earlier finishes are left out.
     """
     finished = [
         issue.last_finish_status_at.date()
         for issue in issues
         if issue.last_finish_status_at
+        and (since is None or issue.last_finish_status_at.date() >= since)
     ]
-    return weekly_counts(finished, now)
+    return weekly_counts(finished, now, since)
+
+
+def history_start(issues: Sequence[Issue]) -> date | None:
+    """First day the fetched history covers: the earliest Jira resolution date.
+
+    A query such as "resolved >= -730d OR resolution = Unresolved" also brings
+    in issues closed with no resolution in any year, whose finishes would
+    stretch the weeks back to before the window. None when Jira resolved
+    nothing, as on trackers that never set a resolution.
+    """
+    resolved = [issue.resolved_at for issue in issues if issue.resolved_at]
+    return min(resolved).date() if resolved else None
 
 
 def weekly_arrivals(issues: Sequence[Issue], now: datetime) -> dict[str, int]:
@@ -156,8 +171,12 @@ def _pace_mean(weekly: Sequence[float], pace: Pace) -> float:
     return float(np.average(samples, weights=chances))
 
 
-def weekly_counts(days: list[date], now: datetime | None = None) -> dict[str, int]:
-    """Count days per finished ISO week, from the first up to the week before now."""
+def weekly_counts(
+    days: list[date],
+    now: datetime | None = None,
+    since: date | None = None,
+) -> dict[str, int]:
+    """Count days per finished ISO week, from the first (or since's) to before now."""
     now = now or datetime.now(tz=UTC)
     current_week = _week_start(now.date())
     counts: dict[str, int] = defaultdict(int)
@@ -169,7 +188,7 @@ def weekly_counts(days: list[date], now: datetime | None = None) -> dict[str, in
     if not counts:
         return {}
 
-    week = _week_start(min(counted))
+    week = _week_start(since or min(counted))
     result: dict[str, int] = {}
     while week < current_week:
         key = week.strftime("%GW%V")
@@ -230,13 +249,15 @@ def burndown(  # noqa: PLR0913
     """Issues of an open list done by the end of each week, one row per run.
 
     Each run draws its share of finishes that go to the list once, since a
-    team's mix of old and new work holds for a while rather than week to week.
+    team's mix of old and new work holds for a while rather than week to week;
+    shares, oldest first, are drawn at the pace, as the weeks are.
     """
     samples, chances = pace_draws(throughput, pace)
     # shares first and weeks drawn week by week, so the first weeks of a long
     # run are those of a short one from the same seed: the fan and the
     # open-work headline then agree at the headline's horizon
-    share = rng.choice(np.asarray(shares, dtype=float), size=(simulations, 1))
+    share_samples, share_chances = pace_draws(shares, pace)
+    share = rng.choice(share_samples, size=(simulations, 1), p=share_chances)
     draws = rng.choice(samples, size=(weeks, simulations), p=chances).T
     done = np.floor(draws.cumsum(axis=1) * share * focus)
     return np.minimum(done, n_open).astype(np.int64)

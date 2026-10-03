@@ -94,6 +94,7 @@ from metrics.services.calculator import (
     cycle_times,
     flow_efficiency,
     handoffs_per_issue,
+    history_start,
     lead_times,
     median_queue_hours,
     monte_carlo_forecast,
@@ -647,11 +648,13 @@ def calculate_metrics(  # noqa: PLR0913
     scatter = cycle_time_points(issues)
     cfd = cumulative_flow(issues, now=now)
     aging = aging_wip(issues, now=now)
-    throughput = weekly_throughput(issues, now=now)
+    since = history_start(issues)
+    throughput = weekly_throughput(issues, now=now, since=since)
     pace, forecast, open_work, checked, dates = _forecast(
         repo,
         issues,
         throughput,
+        since,
         vis_service,
         output_dir,
     )
@@ -818,10 +821,11 @@ def _method_note(
     return " ".join(part for part in parts if part) or None
 
 
-def _forecast(
+def _forecast(  # noqa: PLR0913
     repo: JiraIssuesRepository,
     issues: list[Issue],
     throughput: dict[str, int],
+    since: date | None,
     vis_service: VisService,
     output_dir: Path,
 ) -> tuple[
@@ -840,7 +844,7 @@ def _forecast(
     weeks = list(throughput)
     if not any(issue.is_open for issue in issues):
         return DEFAULT_PACE, {}, {}, None, None
-    pace, moment_at, runs = _choose_forecast_pace(repo, throughput)
+    pace, moment_at, runs = _choose_forecast_pace(repo, throughput, since)
     model, baseline = _open_work_runs(moment_at, weeks, pace)
     recalibrated, past_us = _choose_recalibration(moment_at, weeks, pace, model)
     judged = judged_summary(list(_summaries(model).values()))
@@ -919,10 +923,11 @@ def _date_summary(
 def _choose_forecast_pace(
     repo: JiraIssuesRepository,
     throughput: dict[str, int],
+    since: date | None,
 ) -> tuple[Pace, Callable[[datetime], Moment], BacktestRuns]:
     """Pick the pace of past weeks whose past forecasts scored best."""
     # every pace, horizon and replay rebuilds the same Mondays: convert each once
-    moment_at = cache(lambda at: moment_of(repo.issues_at(at), at))
+    moment_at = cache(lambda at: moment_of(repo.issues_at(at), at, since))
     runs = backtest_paces(
         lambda at: moment_at(at).throughput,
         list(throughput),

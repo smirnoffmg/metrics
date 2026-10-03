@@ -29,6 +29,9 @@ class Issue:
     started_at: datetime | None = None
     last_finish_status_at: datetime | None = None
     discarded: bool = False
+    # a resolved-date query window bounds this, not the finish: a bulk close
+    # can resolve an issue whose done status is years older
+    resolved_at: datetime | None = None
     in_backlog: bool = False
 
     status_history: list[str] = field(default_factory=list)
