@@ -212,6 +212,24 @@ def test_summary_counts_forecasts_whose_outcomes_do_not_overlap():
     assert summary.independent == 4  # noqa: PLR2004
 
 
+def test_summary_counts_independent_promises_beyond_the_outer_5_percent():
+    us = [0.0, 0.03, 0.5, 0.96, 1.0, 0.05, 0.95, 0.2]
+    results = [
+        replace(_backtest(u, 1, 1, 1.0), origin=MONDAY + timedelta(weeks=4 * i))
+        for i, u in enumerate(us)
+    ]
+    # overlaps the first outcome, so its u is not counted
+    results.append(replace(_backtest(0.01, 1, 1, 1.0), origin=MONDAY))
+    # promises nothing, so it is not among the promises judged
+    results.append(
+        replace(_backtest(0.99, 1, 0, 1.0), origin=MONDAY + timedelta(weeks=40)),
+    )
+    summary = summarize_backtests(results)
+    assert summary is not None
+    assert summary.independent == len(us)
+    assert summary.outer_tails == 4  # noqa: PLR2004
+
+
 def test_summary_of_no_backtests_is_none():
     assert summarize_backtests([]) is None
 

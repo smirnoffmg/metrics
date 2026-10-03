@@ -10,6 +10,7 @@ from scipy import stats
 
 from .backtest import (
     MIN_INDEPENDENT_OUTCOMES,
+    OUTER_TAIL,
     SIGNIFICANCE,
     judgeable_summaries,
     judged_summary,
@@ -273,6 +274,43 @@ def heeded_trust(
     return judged_trust
 
 
+def narrow_spread(
+    judged: BacktestSummary | None,
+    summaries: Sequence[BacktestSummary],
+) -> BacktestSummary | None:
+    """Find the horizon whose outcomes fell outside the range beyond chance.
+
+    Read as heeded_trust reads promises: the judged horizon, else the longest
+    shorter one. A range too narrow fails at both ends, which the 85% promise
+    alone, held or not, cannot show.
+    """
+    if judged is None:
+        return None
+    shorter = sorted(
+        (s for s in summaries if s.horizon < judged.horizon),
+        key=lambda s: s.horizon,
+        reverse=True,
+    )
+    return next((s for s in (judged, *shorter) if _spread_p(s) < SIGNIFICANCE), None)
+
+
+def _spread_p(summary: BacktestSummary) -> float:
+    return float(
+        stats.binom.sf(summary.outer_tails - 1, summary.independent, 2 * OUTER_TAIL),
+    )
+
+
+def spread_note(summary: BacktestSummary) -> str:
+    """Say how often outcomes fell outside the forecast's range, with its test."""
+    return (
+        f"{summary.horizon}-week outcomes fell beyond the forecast's"
+        f" {100 * OUTER_TAIL:.0f}th or {100 * (1 - OUTER_TAIL):.0f}th percentile"
+        f" {summary.outer_tails} of {summary.independent} times against"
+        f" {2 * OUTER_TAIL:.0%} expected (binomial p = {_spread_p(summary):.2g}):"
+        " the forecast's range is too narrow."
+    )
+
+
 def _held_as_promised(held: int, of: int) -> bool:
     # an honest 85% promise scores 9 or fewer of 11 about half the time, so only
     # a share too low to be chance shows the forecast is optimistic
@@ -295,6 +333,7 @@ def forecast_verdict(  # noqa: PLR0913
     *,
     release_trust: Trust | None = None,
     release_at_least: float | None = None,
+    narrow: BacktestSummary | None = None,
 ) -> list[str]:
     """Say what to expect of the open issues, how far to trust it and what to do.
 
@@ -302,6 +341,7 @@ def forecast_verdict(  # noqa: PLR0913
     an action last, so the page answers whether to act before any chart.
     The release's lines go just before the action, which also heeds the
     release's own trust and number when it was paced by its own finishes.
+    narrow is the replay narrow_spread found outside the range too often.
     """
     if not open_work or not forecast:
         # the first week may start before the query's window and is left out
@@ -321,6 +361,13 @@ def forecast_verdict(  # noqa: PLR0913
         f" by {open_work['by_date']:%d %b %Y} (85% chance).",
         _trust_sentence(trust, open_work["horizon"]),
     ]
+    if narrow is not None:
+        verdict.append(
+            "The forecast's range is too narrow: past"
+            f" {narrow.horizon}-week outcomes fell outside it {narrow.outer_tails}"
+            f" of {narrow.independent} times,"
+            f" where {2 * OUTER_TAIL:.0%} was expected.",
+        )
     behind = (
         flow is not None and flow.net > 0 and flow.net >= FLOW_NOISE * flow.finished
     )

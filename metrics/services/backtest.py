@@ -56,6 +56,8 @@ BACKTEST_SIMULATIONS: Final[int] = 10_000
 # stands in for the next one
 MIN_SHARE_WINDOWS: Final[int] = 6
 DATE_CHECK_SIMULATIONS: Final[int] = 2_000
+# an outcome beyond this share of the forecast at either end lands outside its range
+OUTER_TAIL: Final[float] = 0.05
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,8 @@ class BacktestSummary:
     bias_p: float | None = None
     trend_p: float | None = None
     held_independent: int = 0
+    # independent promises whose outcome fell beyond OUTER_TAIL at either end
+    outer_tails: int = 0
 
 
 @dataclass(frozen=True)
@@ -688,6 +692,7 @@ def summarize_backtests(results: Sequence[Backtest]) -> BacktestSummary | None:
         if len(independent) > 1 and any(independent)
         else None,
         held_independent=sum(r.actual >= r.at_least_85 for r in picked),
+        outer_tails=sum(not OUTER_TAIL <= u <= 1 - OUTER_TAIL for u in independent),
     )
 
 

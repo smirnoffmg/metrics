@@ -24,11 +24,13 @@ from metrics.services.stats import (
     flow_tile,
     forecast_verdict,
     heeded_trust,
+    narrow_spread,
     open_work_tile,
     promised_done,
     recalibration_note,
     scope_forecast_tile,
     scope_verdict,
+    spread_note,
     trust,
     unmeasured_share_note,
 )
@@ -615,6 +617,7 @@ def test_verdict_has_no_method_jargon():
             Trust(word, 12, 20),
             BacklogFlow(arrived=30.0, finished=24.0),
             DateSummary(held=3, judged=4, not_due=10),
+            narrow=_tails(4, 11),
         )
         for word in ("holds", "optimistic", "unchecked")
     ]
@@ -1096,3 +1099,60 @@ def test_diagnosis_of_drift_cites_the_horizon_the_verdict_judges():
         " the team's pace changes, so correcting forecasts by their past"
         " errors would not hold."
     )
+
+
+def _tails(outer_tails: int, independent: int, horizon: int = 8) -> BacktestSummary:
+    return replace(
+        _summary(independent, independent),
+        horizon=horizon,
+        outer_tails=outer_tails,
+    )
+
+
+def test_narrow_spread_needs_more_outer_tails_than_chance():
+    # P(X >= 3 | 11, 0.1) is about 0.09, P(X >= 4 | 11, 0.1) about 0.019
+    assert narrow_spread(_tails(3, 11), [_tails(3, 11)]) is None
+    narrow = _tails(4, 11)
+    assert narrow_spread(narrow, [narrow]) == narrow
+
+
+def test_narrow_spread_heeds_a_shorter_horizon_as_the_trust_does():
+    eight = _tails(2, 11)
+    four = _tails(7, 23, horizon=4)
+    assert narrow_spread(eight, [four, eight]) == four
+    assert narrow_spread(eight, [_tails(4, 23, horizon=4), eight]) is None
+    assert narrow_spread(None, [four]) is None
+
+
+def test_forecast_verdict_says_the_range_is_too_narrow_after_the_trust():
+    # SPARK: promises held as often as promised, yet outcomes kept landing
+    # beyond either end of the forecast's range
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("holds", 9, 11),
+        None,
+        None,
+        narrow=_tails(4, 11),
+    )
+    assert verdict[2] == (
+        "The forecast's range is too narrow: past 8-week outcomes fell outside"
+        " it 4 of 11 times, where 10% was expected."
+    )
+    plain = forecast_verdict(
+        _open_work(), _dated_forecast(), Trust("holds", 9, 11), None, None
+    )
+    assert verdict[:2] + verdict[3:] == plain
+
+
+def test_spread_note_gives_the_test_behind_the_verdict():
+    assert spread_note(_tails(4, 11)) == (
+        "8-week outcomes fell beyond the forecast's 5th or 95th percentile"
+        " 4 of 11 times against 10% expected (binomial p = 0.019):"
+        " the forecast's range is too narrow."
+    )
+
+
+def test_spread_note_does_not_round_a_strong_rejection_to_zero():
+    # MB, SPARK and FLINK: 6 of 11 eight-week outcomes beyond either end
+    assert "(binomial p = 0.0003)" in spread_note(_tails(6, 11))

@@ -1056,3 +1056,46 @@ def test_validate_config_checks_gitlab_settings():
         validate_config({**base, "deploy_tag_pattern": "^v", "delivery_days": "30"})
         == []
     )
+
+
+def _rising_pace_issues(weeks=30):
+    """Each week finishes one issue more than the week before it.
+
+    Every later outcome exceeds whatever the past weeks resample to, so it
+    falls beyond the forecast's range time after time.
+    """
+    newest = date(2026, 9, 8)
+    issues = [
+        _raw_issue(
+            f"X-{week}-{n}",
+            "Done",
+            (str(newest - timedelta(weeks=week)), "Open", "Done"),
+            resolution="Fixed",
+        )
+        for week in range(weeks)
+        for n in range(weeks - week)
+    ]
+    issues += [_raw_issue(f"X-open-{n}", "Open") for n in range(60)]
+    created = newest - timedelta(weeks=weeks)
+    for raw in issues:
+        raw["fields"]["created"] = f"{created}T00:00:00.000+0000"
+    return issues
+
+
+def test_verdict_says_the_range_is_too_narrow_when_outcomes_leave_it():
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=_rising_pace_issues(),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    section = report[report.index('<section class="verdict">') :]
+    verdict = section[: section.index("</section>")]
+    assert "The forecast's range is too narrow" in verdict
+    assert "binomial p =" in result.output

@@ -125,10 +125,12 @@ from metrics.services.stats import (
     diagnose_backtest,
     forecast_verdict,
     heeded_trust,
+    narrow_spread,
     promised_done,
     recalibration_note,
     scope_forecast_tile,
     scope_verdict,
+    spread_note,
     unmeasured_share_note,
 )
 
@@ -759,6 +761,7 @@ def calculate_metrics(  # noqa: PLR0913
         release,
         release_trust=release_trust,
         release_at_least=scope_open_work.get("at_least_85"),
+        narrow=narrow_spread(judged, backtests.get(used_model or "", [])),
     )
 
     fragments += [
@@ -1096,6 +1099,8 @@ def _report_backtest(  # noqa: PLR0913
         scored = _summaries(recalibrated).get(raw_judged.horizon)
         if scored is not None:
             note = f"{note} {recalibration_note(raw_judged, scored)}"
+    if narrow := narrow_spread(judged, list(summaries.values())):
+        note = f"{note} {spread_note(narrow)}"
     click.echo(f"Backtest: {note}")
     chart = output_dir / "forecast_backtest.png"
     vis_service.vis_backtest(str(chart), used_runs, summaries, judged.horizon)
