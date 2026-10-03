@@ -313,6 +313,31 @@ def test_converter_reopened_and_finished_again_uses_last_finish():
     assert issue.cycle_time == timedelta(days=10)
 
 
+def test_converter_closing_a_resolved_issue_keeps_the_resolved_time():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "In Progress"),
+            ("2024-01-03", "In Progress", "Resolved"),
+            ("2024-03-01", "Resolved", "Closed"),
+        ),
+    )
+    assert issue.last_finish_status_at == datetime(2024, 1, 3, tzinfo=UTC)
+    assert issue.cycle_time == timedelta(days=1)
+
+
+def test_converter_reopening_a_resolved_issue_restarts_its_finish_time():
+    issue = JiraDataConverter().convert_data_to_issue(
+        _issue_moving_through(
+            ("2024-01-02", "Open", "In Progress"),
+            ("2024-01-03", "In Progress", "Resolved"),
+            ("2024-01-10", "Resolved", "Reopened"),
+            ("2024-01-12", "Reopened", "Resolved"),
+            ("2024-03-01", "Resolved", "Closed"),
+        ),
+    )
+    assert issue.last_finish_status_at == datetime(2024, 1, 12, tzinfo=UTC)
+
+
 def test_converter_cancelled_issue_is_discarded_not_done():
     issue = JiraDataConverter().convert_data_to_issue(
         _issue_moving_through(
@@ -490,6 +515,19 @@ def test_status_category_done_finishes_a_status_named_anything():
     issue = JiraDataConverter().convert_data_to_issue(raw, CATEGORIES)
     assert issue.last_finish_status_at == datetime(2024, 1, 6, tzinfo=UTC)
     assert issue.cycle_time == timedelta(days=4)
+
+
+def test_status_category_done_to_done_keeps_the_first_finish_time():
+    raw = _issue_through_ids(
+        ("2024-01-02", "New", "Waiting for review"),
+        ("2024-01-06", "Waiting for review", "Shipped"),
+        ("2024-03-01", "Shipped", "Archived"),
+        current="Archived",
+    )
+    issue = JiraDataConverter().convert_data_to_issue(
+        raw, {**CATEGORIES, "id-Archived": "done"}
+    )
+    assert issue.last_finish_status_at == datetime(2024, 1, 6, tzinfo=UTC)
 
 
 def test_discarded_status_names_win_over_the_done_category():

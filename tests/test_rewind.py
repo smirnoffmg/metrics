@@ -134,3 +134,37 @@ def test_rewound_issue_converts_to_what_jira_showed_then():
     assert then.last_finish_status_at == datetime(2024, 1, 10, tzinfo=UTC)
     assert then.status == "Done"
     assert converter.convert_data_to_issue(reopened).is_open
+
+
+def test_a_resolved_issue_closed_later_keeps_one_finish_time_through_rewinds():
+    converter = JiraDataConverter(done_statuses=["resolved", "closed"])
+    raw = {
+        "key": "X-2",
+        "fields": {
+            "created": "2024-01-01T00:00:00.000+0000",
+            "status": {"id": "6", "name": "Closed"},
+            "resolution": {"name": "Fixed"},
+        },
+        "changelog": {
+            "histories": [
+                _history(
+                    "2024-01-05T00:00:00.000+0000",
+                    "status",
+                    ("3", "In Progress"),
+                    ("5", "Resolved"),
+                ),
+                _history(
+                    "2024-03-01T00:00:00.000+0000",
+                    "status",
+                    ("5", "Resolved"),
+                    ("6", "Closed"),
+                ),
+            ],
+        },
+    }
+    between = rewind_issue(raw, datetime(2024, 2, 1, tzinfo=UTC))
+    assert between is not None
+
+    resolved = datetime(2024, 1, 5, tzinfo=UTC)
+    assert converter.convert_data_to_issue(between).last_finish_status_at == resolved
+    assert converter.convert_data_to_issue(raw).last_finish_status_at == resolved

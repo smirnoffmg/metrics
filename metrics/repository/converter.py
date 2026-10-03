@@ -193,8 +193,13 @@ class JiraDataConverter:
         category = status_categories.get(item.get("to") or "")
         is_done = self._is_done(to_status, category)
         is_discarded = not is_done and to_status in self.discarded_statuses
-        # a reopened issue must stop counting as finished or discarded
-        data["last_finish_status_at"] = history_ts if is_done else None
+        # a reopened issue must stop counting as finished or discarded, while
+        # done→done (Resolved→Closed, often a bulk close at release) keeps the
+        # time the work was actually finished
+        if not is_done:
+            data["last_finish_status_at"] = None
+        elif data["last_finish_status_at"] is None:
+            data["last_finish_status_at"] = history_ts
         data["discarded"] = is_discarded
         if (
             data["started_at"] is None
