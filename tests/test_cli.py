@@ -94,6 +94,12 @@ def test_cli_accepts_discarded_resolutions():
     assert "--discarded-resolutions" in result.output
 
 
+def test_forecast_jql_help_says_the_scope_is_paced_by_its_own_finishes():
+    result = CliRunner().invoke(cli, ["--help"], terminal_width=1000)
+    assert "at the pace of the main query" not in result.output
+    assert "paced by its own past finishes" in result.output
+
+
 def test_validate_config_from_raw_needs_no_jira_settings():
     assert validate_config({"from_raw": "raw.json"}) == []
 
@@ -281,7 +287,7 @@ def test_cli_forecasts_the_scope_saved_in_a_snapshot():
         assert result.exit_code == 0, result.output
         report = Path("output/report.html").read_text()
     assert "fixVersion = 7.2: 2 of 3 issues open" in result.output
-    assert "50% of team throughput, assumed, not checked" in result.output
+    assert "at an assumed 50% of the team's pace, not checked" in result.output
     assert "all 3 issues of the scope done (85% chance)" in report
     assert "fixVersion = 7.2" in report
 
@@ -408,7 +414,7 @@ def test_the_scope_fan_promises_what_its_headline_does(monkeypatch):
 
 def test_forecast_focus_given_overrides_measured_scope():
     output, _ = _run_release("--forecast-focus", "0.5")
-    assert "50% of team throughput, assumed, not checked" in output
+    assert "at an assumed 50% of the team's pace, not checked" in output
     assert "Scope: at least" not in output
     assert "Scope backtest" not in output
 
@@ -437,7 +443,7 @@ def test_scope_without_history_says_not_checked():
         save_snapshot(snapshot, Path("raw.json"))
         result = runner.invoke(cli, ["--from-raw", "raw.json"])
         assert result.exit_code == 0, result.output
-    assert "at team throughput, not checked" in result.output
+    assert "at the whole team's pace, not checked" in result.output
     assert "Scope backtest" not in result.output
 
 
@@ -501,6 +507,7 @@ def test_backtest_replays_issues_open_at_each_monday():
     assert "Forecast: at least 1 of 32 open issues done in" in result.output
     assert "of 32 open issues done in" in report
     assert "Baseline (all throughput to open issues): held 0 of" in result.output
+    assert "<td>baseline (all throughput to open issues)</td>" in report
     assert "85% of backlog done" not in report
     assert "<td>throughput, last 12 weeks, pace used</td>" in report
     assert "Clear dates: " in result.output

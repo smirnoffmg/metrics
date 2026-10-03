@@ -431,10 +431,10 @@ class VisService(BaseService):
                 label=f"actual, {label} ({len(picked)})",
             )
         history.set_xlabel("forecast made on")
-        history.set_ylabel(f"issues finished in the next {horizon} weeks")
+        history.set_ylabel(f"issues open then, done within {horizon} weeks")
         history.set_title(
-            f"{summary.held_85:.0%} of 85% forecasts held"
-            f" ({summary.independent} independent)",
+            f"Past {horizon}-week promises held"
+            f" {summary.held_independent} of {summary.independent} times",
         )
         history.legend()
         plt.setp(history.get_xticklabels(), rotation=45, ha="right")

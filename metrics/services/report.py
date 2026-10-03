@@ -43,7 +43,7 @@ a {{ color: #2a78d6; }}
 img {{ max-width: 100%; }}
 section {{ margin-bottom: 2rem; background: #fcfcfb; border-radius: 8px;
           border: 1px solid rgba(11,11,11,0.10); padding: 1rem; }}
-h2 {{ text-transform: capitalize; font-size: 1.1rem; color: #52514e; }}
+h2 {{ font-size: 1.1rem; color: #52514e; }}
 .verdict {{ font-size: 1.15rem; line-height: 1.5; }}
 .verdict p {{ margin: 0.3rem 0; }}
 .verdict p:last-child {{ font-weight: 650; }}
@@ -83,11 +83,28 @@ def _details_html(summary: str, *parts: str) -> str:
     return f"<details><summary>{summary}</summary>\n{body}\n</details>"
 
 
+_IMAGE_TITLES = {
+    "lead_time": "Lead time",
+    "cycle_time": "Cycle time",
+    "return_to_testing": "Returns to testing per issue",
+    "throughput": "Throughput per week",
+    "cumulative_queue_time": "Median hours in each status",
+    "queue_time": "Days in each status",
+    "handoffs": "Handoffs per issue",
+    "forecast_backtest": "Past forecasts against what got done",
+    "deployment_frequency": "Deployment frequency",
+    "change_lead_time": "Change lead time",
+}
+
+
 def _image_sections(images: Iterable[Path]) -> list[str]:
     sections = []
     for image in images:
         encoded = base64.b64encode(image.read_bytes()).decode("ascii")
-        title = image.stem.replace("_", " ")
+        title = _IMAGE_TITLES.get(
+            image.stem,
+            image.stem.replace("_", " ").capitalize(),
+        )
         sections.append(
             f'<section><h2>{title}</h2><img alt="{title}" '
             f'src="data:image/png;base64,{encoded}"/></section>',

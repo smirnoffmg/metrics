@@ -111,6 +111,7 @@ from metrics.services.delivery import (
 )
 from metrics.services.stats import (
     Tile,
+    assumed_pace_note,
     backtest_tile,
     build_delivery_tiles,
     build_headline_tiles,
@@ -369,7 +370,8 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     "--forecast-jql",
     envvar="JIRA_FORECAST_JQL",
     help="JQL naming the issues to forecast, such as an epic or a release"
-    " (e.g. 'fixVersion = 7.2'); forecast at the pace of the main query's issues.",
+    " (e.g. 'fixVersion = 7.2'); paced by its own past finishes, or by the whole"
+    " team's when it has too few or --forecast-focus is given.",
 )
 @click.option(
     "--forecast-focus",
@@ -718,6 +720,7 @@ def calculate_metrics(  # noqa: PLR0913
             repo.snapshot.forecast_jql,
             scoped,
             trust(judged_summary(list(scope_runs.values()))),
+            forecast_focus,
         )
         if scope_forecast:
             scope_promise = _promise(scoped.open_work)
@@ -757,7 +760,6 @@ def calculate_metrics(  # noqa: PLR0913
         aging,
         open_work,
         forecast,
-        throughput,
         flow_efficiency(issues, active_statuses),
         backtest=backtest_tile(judged),
         scope_tile=scope_tile,
@@ -1019,7 +1021,7 @@ def _report_backtest(  # noqa: PLR0913
     tables = {"open work": list(_summaries(model).values())}
     if recalibrated is not None:
         tables["open work, recalibrated"] = list(_summaries(recalibrated).values())
-    tables["open work, all throughput (old assumption)"] = list(
+    tables["baseline (all throughput to open issues)"] = list(
         _summaries(baseline).values(),
     )
     for p, by_horizon in runs.items():
@@ -1138,11 +1140,7 @@ def _forecast_scope(  # noqa: PLR0913
             pace=pace,
         )
         result = ScopeResult(forecast, {}, {}, None, "assumed")
-        note = (
-            "at team throughput, not checked"
-            if focus is None
-            else f"at {focus:.0%} of team throughput, assumed, not checked"
-        )
+        note = assumed_pace_note(focus)
     open_count = sum(1 for issue in scope if issue.is_open)
     # the query on its own line: a chart title cannot fit a long one beside the rest
     summary = f"{jql}\n{open_count} of {len(scope)} issues open"
@@ -1184,7 +1182,7 @@ def _measured_scope(
             f" (too few past {horizon}-week windows); assuming all of them",
         )
         shares = [1.0]
-    # as in the backtest: the first week may predate the scope's first finish
+    # the first week starts at the scope's first finish, so it is only partly counted
     history = dict(list(throughput.items())[1:])
     forecast = monte_carlo_forecast(
         scope,

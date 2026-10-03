@@ -21,7 +21,7 @@ The promise counts only issues open today. New work keeps arriving and takes its
 
 > Past 8-week promises like this one held 9 of 11 times, in line with the 85% promised.
 >
-> Commit to the number, but don't promise a date for all of it; scope a release with --forecast-jql.
+> Commit to the number, but don't promise a date for all of it; forecast a specific release instead (--forecast-jql).
 >
 > *- Hibernate*
 
@@ -65,7 +65,7 @@ Then open `output/report.html`.
 - **Jira Cloud:** also pass `--jira-email you@company.com` together with an API token.
 - **Jira Server / Data Center:** just a personal access token, no email needed.
 - **Public instance?** `--anonymous` needs no credentials at all and figures out Cloud vs Server by itself.
-- **When will this release or epic be done?** Name its issues with `--forecast-jql 'fixVersion = "9.0"'`. With seven weeks or more of its own finishes it is forecast from them, which already leave out the time the team spent on other work, and replayed like the main forecast. If you'd rather state how much of the team works on it, `--forecast-focus 0.5` forecasts at half the team's throughput; the report marks that as an assumption it cannot check.
+- **When will this release or epic be done?** Name its issues with `--forecast-jql 'fixVersion = "9.0"'`. With seven weeks or more of its own finishes it is forecast from them, which already leave out the time the team spent on other work, and replayed like the main forecast. If you'd rather state how much of the team works on it, `--forecast-focus 0.5` forecasts at half the team's pace; the report marks that as an assumption it cannot check. With too few finishes of its own and no focus, the release is forecast at the whole team's pace, also marked not checked.
 - **Your workflow ends differently?** Tell it what "finished" means, e.g. `--done-statuses "Resolved, Shipped"`. By default Jira's own status categories decide: statuses in the Done category finish an issue, statuses in To Do are backlog.
 - **Dropped work isn't delivery.** Statuses like `--discarded-statuses "Rejected, Duplicate"` (default: cancelled, canceled, won't do) count neither as throughput nor as open work. The same goes for issues closed with a resolution like Won't Fix or Duplicate - set your own with `--discarded-resolutions "Won't Fix, Out of scope"`.
 - **Cycle time starts at commitment, not at triage.** It runs from the moment an issue first leaves the backlog; by default, when it first leaves Jira's To Do category; name your pre-work statuses yourself with `--backlog-statuses "Open, Ready"`. Issues closed straight from the backlog have a lead time but no cycle time.
@@ -134,7 +134,7 @@ The report names no one. Data on individuals works only as self-assessment that 
 ### The forecast
 
 - **What it predicts.** Of the issues open today, how many get done in the next H weeks, at 85% and at 50%. Each simulation draws past weeks' throughput and a share of finishes that went to issues already open, taken from past H-week windows. The headline promise is the 15th percentile of the done count.
-- **Why a share.** Work is not served first-in, first-out: urgent and short jobs move to the front (Reinertsen, *The Principles of Product Development Flow*, с. 70, PDF 84), so new arrivals take part of every week. A queue's size is only the balance of arrivals and departures (с. 71–72, PDF 85–86), and with both random it may stay far from zero for long periods (Q15, the Diffusion Principle, с. 76–78, PDF 90–92). Assuming all throughput goes to today's list is the old belief, and the replay shows what it costs: on Hibernate it held 2 of 11 independent 8-week promises (14% of 83 past forecasts), against 9 of 11 with the share.
+- **Why a share.** Work is not served first-in, first-out: urgent and short jobs move to the front (Reinertsen, *The Principles of Product Development Flow*, с. 70, PDF 84), so new arrivals take part of every week. A queue's size is only the balance of arrivals and departures (с. 71–72, PDF 85–86), and with both random it may stay far from zero for long periods (Q15, the Diffusion Principle, с. 76–78, PDF 90–92). The baseline, all throughput to open issues, is the old belief, and the replay shows what it costs: on Hibernate it held 2 of 11 independent 8-week promises (14% of 83 past forecasts), against 9 of 11 with the share.
 - **Fixed date, variable scope.** "How much by when" is the question a forecast can answer and check; "when will all of it be done" depends on work not yet asked for (Beck, *Extreme Programming Explained*, 1st ed., PDF 23). The clear date is still shown, from the same simulation, capped at 2 years.
 
 ### The replay
@@ -144,7 +144,7 @@ The report names no one. Data on individuals works only as self-assessment that 
 - **Pace.** The same replay picks which past weeks the forecast draws from - the last 12, 26 or 52 weeks equally, or every week weighted by recency with a half-life of 4 or 8 weeks - by the lowest CRPS, a score of how far past forecasts landed from what happened. Paces within 5% of the best count as equal and the earlier in that list wins. Hibernate forecasts from the last 26 weeks, Kafka from a half-life of 4 weeks.
 - **Bias and drift.** A u-plot per horizon shows whether past forecasts leaned optimistic, pessimistic or too narrow; a y-plot test (after Brocklehurst and Littlewood) shows whether their errors drift over time, tested on independent outcomes only. On Hibernate, 4-week forecast errors drift over time (y-plot p = 0.010): the team's pace changes.
 - **Recalibration.** When errors keep a steady bias but don't drift, the book's remedy is tried: every past forecast is recalibrated by the u-plot of the forecasts whose outcomes were known by its Monday. It is used only when it also wins on a global score - CRPS standing in for the prequential likelihood Fenton and Pfleeger ask for - and the tile then says so.
-- **The naive baseline.** A clever predictor may barely beat a naive one (Fenton & Pfleeger, Example 3.17, с. 105). So the table shows "all throughput to today's list" next to the model, at every horizon.
+- **The naive baseline.** A clever predictor may barely beat a naive one (Fenton & Pfleeger, Example 3.17, с. 105). So the table shows "baseline (all throughput to open issues)" next to the model, at every horizon.
 - **Clear dates.** Past "all done by D" promises are judged only once D has passed, and only when their intervals don't overlap. On both trackers: 0 judged; all 90 past promises fall beyond the data so far.
 
 ![Forecast backtest](docs/images/forecast_backtest.png)

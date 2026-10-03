@@ -126,6 +126,7 @@ class BacklogFlow:
 
     arrived: float
     finished: float
+    pace: Pace | None = None
 
     @property
     def net(self) -> float:
@@ -146,6 +147,7 @@ def backlog_flow(
     return BacklogFlow(
         arrived=_pace_mean([arrivals.get(week, 0) for week in throughput], pace),
         finished=_pace_mean(list(throughput.values()), pace),
+        pace=pace,
     )
 
 

@@ -604,6 +604,8 @@ def test_backlog_flow_weighs_arrivals_and_finishes_by_pace():
     assert flow.arrived == pytest.approx(7 / 3)
     assert flow.finished == pytest.approx(10 / 3)
     assert flow.net == pytest.approx(-1.0)
+    # the report names the weeks these figures come from
+    assert flow.pace == Pace(half_life=1)
 
 
 def test_backlog_flow_without_throughput():

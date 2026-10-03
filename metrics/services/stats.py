@@ -92,30 +92,11 @@ def _forecast_tile(forecast: dict[str, Any], label: str) -> Tile:
     return Tile(label, f"by {forecast['p85_date']:%d %b %Y}")
 
 
-def _throughput_tile(throughput: dict[str, int]) -> Tile:
-    label = "Throughput"
-    if not throughput:
-        return Tile(label, "n/a")
-    values = list(throughput.values())
-    half = len(values) // 2
-    current = values[half:]
-    value = fmean(current)
-    if half < 2:  # noqa: PLR2004
-        return Tile(label, f"{value:.1f}/wk")
-    delta = value - fmean(values[:half])
-    if delta == 0:
-        return Tile(label, f"{value:.1f}/wk")
-    arrow = "↑" if delta > 0 else "↓"
-    # higher throughput is the good direction
-    return Tile(label, f"{value:.1f}/wk", f"{arrow} {abs(delta):.1f}", delta > 0)
-
-
 def build_headline_tiles(  # noqa: PLR0913
     scatter: pd.DataFrame,
     aging: pd.DataFrame,
     open_work: dict[str, Any],
     forecast: dict[str, Any],
-    throughput: dict[str, int],
     flow_efficiency: float,
     *,
     backtest: Tile | None = None,
@@ -132,7 +113,6 @@ def build_headline_tiles(  # noqa: PLR0913
         flow_tile(flow),
         _cycle_tile(scatter),
         Tile("Work in progress", str(len(aging))),
-        _throughput_tile(throughput),
         Tile("Flow efficiency", f"{flow_efficiency:.0%}"),
     ]
 
@@ -166,9 +146,9 @@ def flow_tile(flow: BacklogFlow | None) -> Tile:
     It says nothing of the open list's direction: discarded issues leave it too,
     and they are not among the finishes.
     """
-    label = "Arrivals and finishes"
     if flow is None:
-        return Tile(label, "n/a")
+        return Tile("Arrivals and finishes", "n/a")
+    label = "Arrivals and finishes" + (f", {flow.pace.label}" if flow.pace else "")
     value = f"{flow.arrived:.1f} in / {flow.finished:.1f} done per week"
     if abs(flow.net) < FLOW_NOISE * flow.finished:
         return Tile(label, value)
@@ -269,7 +249,9 @@ def forecast_verdict(  # noqa: PLR0913
     action = _ACTIONS[trust.word]
     if behind or forecast["p85_date"] is None:
         action = f"{action[:-1]}, but don't promise a date for all of it" + (
-            "." if release else "; scope a release with --forecast-jql."
+            "."
+            if release
+            else "; forecast a specific release instead (--forecast-jql)."
         )
     verdict.append(action)
     return verdict
@@ -327,8 +309,23 @@ def _clear_date_sentence(
     return f"{sentence}; no past date like it has come due to check it."
 
 
-def scope_verdict(jql: str, scope: ScopeResult, trust: Trust) -> list[str]:
-    """Say when the release a forecast query names gets done, and what that rests on."""
+def assumed_pace_note(focus: float | None) -> str:
+    """Say what a scope forecast not paced by its own finishes rests on."""
+    if focus is None:
+        return "at the whole team's pace, not checked"
+    return f"at an assumed {focus:.0%} of the team's pace, not checked"
+
+
+def scope_verdict(
+    jql: str,
+    scope: ScopeResult,
+    trust: Trust,
+    focus: float | None = None,
+) -> list[str]:
+    """Say when the release a forecast query names gets done, and what that rests on.
+
+    focus is the share of the team's pace assumed for the release, if given.
+    """
     forecast = scope.forecast
     if not forecast:
         return [f"Release {jql}: nothing left to forecast, or too little history."]
@@ -344,16 +341,13 @@ def scope_verdict(jql: str, scope: ScopeResult, trust: Trust) -> list[str]:
             _trust_sentence(trust, open_work["horizon"]),
             _clear_date_sentence(forecast, scope.dates, "of its open issues"),
         ]
-    when = (
-        "not within 2 years"
+    done = (
+        f"not all {forecast['backlog']} open issues done within 2 years"
         if forecast["p85_date"] is None
-        else f"by {forecast['p85_date']:%d %b %Y}"
+        else f"all {forecast['backlog']} open issues done"
+        f" by {forecast['p85_date']:%d %b %Y}"
     )
-    return [
-        f"Release {jql}: all {forecast['backlog']} open issues done {when}"
-        " (85% chance), at an assumed share of the team's time.",
-        "That share is not checked against the past.",
-    ]
+    return [f"Release {jql}: {done} (85% chance), {assumed_pace_note(focus)}."]
 
 
 def diagnose_backtest(summaries: Sequence[BacktestSummary]) -> str:

@@ -392,7 +392,7 @@ def backtest_open_work(  # noqa: PLR0913
 
     Throughput is scaled by past shares of finishes that went to issues
     already open, from windows that ended by the Monday; assume_share replaces
-    them, 1.0 being the old belief that all throughput goes to the open list.
+    them, 1.0 being the baseline: all throughput to open issues.
     Origins without min_shares such windows are skipped either way, so a
     baseline replays the same Mondays. Recalibration as in backtest_forecast.
     """

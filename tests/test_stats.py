@@ -7,10 +7,11 @@ from datetime import UTC, date, datetime
 import pandas as pd
 
 from metrics.services.backtest import BacktestSummary, DateSummary, ScopeResult
-from metrics.services.calculator import BacklogFlow
+from metrics.services.calculator import BacklogFlow, Pace
 from metrics.services.stats import (
     Tile,
     Trust,
+    assumed_pace_note,
     backtest_tile,
     build_delivery_tiles,
     build_headline_tiles,
@@ -74,24 +75,23 @@ def test_build_headline_tiles_values_and_deltas():
         aging=_aging_df(),
         open_work=_open_work(),
         forecast={"p85": 5.0, "p85_date": date(2024, 3, 1), "backlog": 151},
-        throughput={"2024W01": 2, "2024W02": 2, "2024W03": 4, "2024W04": 4},
         flow_efficiency=0.25,
         backtest=backtest,
-        flow=BacklogFlow(arrived=3.0, finished=4.0),
+        flow=BacklogFlow(arrived=3.0, finished=4.0, pace=Pace(window=12)),
     )
+    # one "done per week" figure: the flow tile's, at the forecast's pace
     assert tiles == [
         Tile("of 151 open issues done in 8 weeks (85% chance)", "≥ 31"),
         backtest,
         Tile("all 151 open issues done (85% chance)", "by 01 Mar 2024"),
         Tile(
-            "Arrivals and finishes",
+            "Arrivals and finishes, last 12 weeks",
             "3.0 in / 4.0 done per week",
             "more get done than arrive",
             delta_good=True,
         ),
         Tile("Cycle time p50", "4.0d", "↓ 6.0d", delta_good=True),
         Tile("Work in progress", "3", None, delta_good=None),
-        Tile("Throughput", "4.0/wk", "↑ 2.0", delta_good=True),
         Tile("Flow efficiency", "25%", None, delta_good=None),
     ]
 
@@ -102,7 +102,6 @@ def test_build_headline_tiles_without_forecast_or_history():
         aging=_aging_df(),
         open_work={},
         forecast={},
-        throughput={"2024W01": 2},
         flow_efficiency=0.0,
     )
     assert [tile.value for tile in tiles[:3]] == ["n/a", "n/a", "n/a"]
@@ -135,7 +134,6 @@ def test_build_headline_tiles_puts_the_scope_after_the_date():
         aging=_aging_df(),
         open_work={},
         forecast={},
-        throughput={"2024W01": 2},
         flow_efficiency=0.0,
         scope_tile=scope,
     )
@@ -164,7 +162,6 @@ def test_build_headline_tiles_leave_out_the_scope_tile_without_a_scope():
         aging=_aging_df(),
         open_work={},
         forecast={},
-        throughput={"2024W01": 2},
         flow_efficiency=0.0,
     )
     assert not any("of the scope" in tile.label for tile in tiles)
@@ -262,6 +259,11 @@ def test_flow_tile_flags_more_arriving_than_done():
         delta_good=False,
     )
     assert flow_tile(None).value == "n/a"
+
+
+def test_flow_tile_names_the_weeks_its_figures_come_from():
+    flow = BacklogFlow(arrived=3.0, finished=4.0, pace=Pace(half_life=8))
+    assert flow_tile(flow).label == "Arrivals and finishes, half-life 8 weeks"
 
 
 def test_flow_tile_claims_no_direction_within_weekly_noise():
@@ -477,8 +479,10 @@ def test_forecast_verdict_advises_against_a_date_when_arrivals_outpace_finishes(
     text = " ".join(verdict)
     assert "Not all 151 open issues will be done within 2 years" in text
     assert "more arrive than get done" in text
-    assert "don't promise a date for all of it" in verdict[-1]
-    assert "--forecast-jql" in verdict[-1]
+    assert verdict[-1] == (
+        "Commit to the number, but don't promise a date for all of it;"
+        " forecast a specific release instead (--forecast-jql)."
+    )
 
 
 def test_forecast_verdict_without_a_forecast():
@@ -560,7 +564,8 @@ def test_scope_verdict_does_not_lend_the_replayed_trust_to_its_date():
     assert "no past date like it has come due" in date_line
 
 
-def test_scope_verdict_says_an_assumed_share_is_not_checked():
+def test_scope_verdict_without_a_focus_says_the_whole_team_pace_is_not_checked():
+    # no --forecast-focus: the whole team's pace is used, and no share was assumed
     verdict = scope_verdict(
         "fixVersion = 7.2",
         ScopeResult(
@@ -572,9 +577,10 @@ def test_scope_verdict_says_an_assumed_share_is_not_checked():
         ),
         trust(None),
     )
-    assert "not within 2 years" in verdict[0]
-    assert "assumed share of the team's time" in verdict[0]
-    assert "not checked" in verdict[1]
+    assert verdict == [
+        "Release fixVersion = 7.2: not all 10 open issues done within 2 years"
+        " (85% chance), at the whole team's pace, not checked.",
+    ]
 
 
 def test_forecast_verdict_puts_the_release_before_the_action():
@@ -626,7 +632,7 @@ def test_forecast_verdict_does_not_vouch_for_a_date_from_too_few_checks():
     assert "only 1 past date like it has come due" in text
 
 
-def test_scope_verdict_names_the_assumed_share_once():
+def test_scope_verdict_names_the_assumed_focus_once():
     verdict = scope_verdict(
         "fixVersion = 7.2",
         ScopeResult(
@@ -637,8 +643,19 @@ def test_scope_verdict_names_the_assumed_share_once():
             "assumed",
         ),
         trust(None),
+        focus=0.5,
     )
-    assert " ".join(verdict).count("assumed share") == 1
+    assert verdict == [
+        "Release fixVersion = 7.2: all 10 open issues done by 01 Jul 2024"
+        " (85% chance), at an assumed 50% of the team's pace, not checked.",
+    ]
+
+
+def test_assumed_pace_note_matches_the_verdict():
+    assert assumed_pace_note(None) == "at the whole team's pace, not checked"
+    assert assumed_pace_note(0.4) == (
+        "at an assumed 40% of the team's pace, not checked"
+    )
 
 
 def test_forecast_verdict_flow_keeps_the_decimal_that_decides_behind():

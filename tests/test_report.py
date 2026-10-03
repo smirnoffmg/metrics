@@ -16,6 +16,23 @@ ONE_PIXEL_PNG = base64.b64decode(
 )
 
 
+def test_report_titles_image_sections_in_words(tmp_path):
+    charts = []
+    for name in ("lead_time", "return_to_testing", "forecast_backtest"):
+        png = tmp_path / f"{name}.png"
+        png.write_bytes(ONE_PIXEL_PNG)
+        charts.append(png)
+    out = tmp_path / "report.html"
+
+    ReportService().render(str(out), tiles=[], images=charts)
+
+    html = out.read_text(encoding="utf-8")
+    assert "<h2>Lead time</h2>" in html
+    assert "<h2>Returns to testing per issue</h2>" in html
+    assert "<h2>Past forecasts against what got done</h2>" in html
+    assert "text-transform" not in html
+
+
 def test_report_renders_tiles_fragments_stuck_and_images(tmp_path):
     charts = []
     for name in ("cycle_time", "throughput"):

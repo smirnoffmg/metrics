@@ -244,6 +244,41 @@ def test_visservice_vis_backtest_creates_file(temp_png_file):
     assert Path(temp_png_file).exists()
 
 
+def test_vis_backtest_reads_held_promises_as_natural_frequencies(monkeypatch):
+    saved = []
+    monkeypatch.setattr(
+        VisService,
+        "_save_figure",
+        lambda _self, fig, _name: saved.append(fig),
+    )
+    results = [
+        Backtest(
+            origin=date(2024, 1, 1 + 7 * i),
+            horizon=8,
+            actual=actual,
+            p50=10.0,
+            at_least_85=6.0,
+            u=0.5,
+            crps=2.0,
+        )
+        for i, actual in enumerate([12, 4, 10])
+    ]
+    summary = BacktestSummary(
+        horizon=8,
+        count=83,
+        independent=11,
+        held_85=0.77,
+        kolmogorov=0.3,
+        mean_crps=2.0,
+        held_independent=9,
+    )
+    VisService().vis_backtest("unused.png", {8: results}, {8: summary}, horizon=8)
+    history = saved[0].axes[0]
+    # same framing as the tile: independent promises, not the overlapping share
+    assert history.get_title() == "Past 8-week promises held 9 of 11 times"
+    assert history.get_ylabel() == "issues open then, done within 8 weeks"
+
+
 def test_fan_lines_stop_a_little_past_the_list_clearing():
     result = {
         "backlog": 4,
