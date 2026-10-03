@@ -19,11 +19,13 @@ from scipy import stats
 
 from .calculator import (
     DEFAULT_PACE,
+    MAX_FORECAST_WEEKS,
     MIN_FORECAST_HISTORY_WEEKS,
     Pace,
     burndown,
     pace_draws,
     weekly_throughput,
+    weeks_to_clear,
 )
 
 if TYPE_CHECKING:
@@ -53,6 +55,7 @@ BACKTEST_SIMULATIONS: Final[int] = 10_000
 # past windows a share of finishes going to already open issues needs before it
 # stands in for the next one
 MIN_SHARE_WINDOWS: Final[int] = 6
+DATE_CHECK_SIMULATIONS: Final[int] = 2_000
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,28 @@ class BacktestSummary:
     bias_p: float | None = None
     trend_p: float | None = None
     held_independent: int = 0
+
+
+@dataclass(frozen=True)
+class DateCheck:
+    """A clear date promised at a past Monday and when the list it covered cleared.
+
+    The list cleared once none of its issues was open, done or dropped; None
+    for either date when the promise was beyond the cap or the data.
+    """
+
+    origin: date
+    promised: date | None
+    cleared_on: date | None
+
+
+@dataclass(frozen=True)
+class DateSummary:
+    """How many past clear dates held, among those due and independent."""
+
+    held: int
+    judged: int
+    not_due: int
 
 
 @dataclass(frozen=True)
@@ -400,6 +425,100 @@ def backtest_open_work(  # noqa: PLR0913
             ),
         )
     return results
+
+
+def date_checks(  # noqa: PLR0913
+    moment_at: Callable[[datetime], Moment],
+    weeks: Sequence[str],
+    *,
+    horizon: int,
+    pace: Pace,
+    min_history: int = MIN_FORECAST_HISTORY_WEEKS,
+    min_shares: int = MIN_SHARE_WINDOWS,
+    max_weeks: int = MAX_FORECAST_WEEKS,
+    seed: int | None = None,
+    simulations: int = DATE_CHECK_SIMULATIONS,
+) -> list[DateCheck]:
+    """Promise from each past Monday when all issues open then are cleared, and check.
+
+    The promise is the forecast's 85% clear date with shares from horizon-week
+    windows that ended by the Monday, as the forecast takes them today; the
+    list is checked at each later Monday the data reaches.
+    """
+    rng = np.random.default_rng(seed)
+    moment_at = cache(moment_at)
+    mondays = [_monday(week) for week in weeks]
+    shares_by_window = _window_shares(
+        moment_at, weeks, until=len(weeks), horizon=horizon
+    )
+    checks = []
+    for i in range(1 + min_history, len(mondays)):
+        origin = mondays[i]
+        known = moment_at(_midnight(origin))
+        history = [
+            count for week, count in known.throughput.items() if week != weeks[0]
+        ]
+        shares = [s for s in shares_by_window[: max(0, i - horizon)] if s is not None]
+        n_open = len(known.open_keys)
+        if len(history) < min_history or len(shares) < min_shares or n_open == 0:
+            continue
+        done = burndown(
+            n_open,
+            history,
+            rng,
+            weeks=max_weeks,
+            pace=pace,
+            shares=shares,
+            simulations=simulations,
+        )
+        p85 = float(np.percentile(weeks_to_clear(done, n_open), 85))
+        checks.append(
+            DateCheck(
+                origin=origin,
+                promised=origin + timedelta(weeks=p85) if p85 <= max_weeks else None,
+                cleared_on=_cleared_on(moment_at, known.open_keys, origin, mondays),
+            ),
+        )
+    return checks
+
+
+def _cleared_on(
+    moment_at: Callable[[datetime], Moment],
+    keys: frozenset[str],
+    origin: date,
+    mondays: Sequence[date],
+) -> date | None:
+    # the data reaches the Monday after its last complete week
+    for k in range(1, (mondays[-1] - origin).days // 7 + 2):
+        day = origin + timedelta(weeks=k)
+        if keys.isdisjoint(moment_at(_midnight(day)).open_keys):
+            return day
+    return None
+
+
+def summarize_date_checks(checks: Sequence[DateCheck], last: date) -> DateSummary:
+    """Held clear dates among those due by last whose intervals do not overlap.
+
+    A list fed by new work may never empty, so a promise counts only once its
+    date has passed; a promise beyond the cap is never due.
+    """
+    due = [c for c in checks if c.promised is not None and c.promised <= last]
+    picked: list[DateCheck] = []
+    free_from = date.min
+    for check in sorted(due, key=lambda c: c.origin):
+        if check.origin >= free_from and check.promised is not None:
+            picked.append(check)
+            free_from = check.promised
+    return DateSummary(
+        held=sum(
+            c.cleared_on is not None
+            and c.promised is not None
+            and c.cleared_on <= c.promised
+            for c in picked
+        ),
+        judged=len(picked),
+        not_due=len(checks) - len(due),
+    )
 
 
 def backtest_paces(

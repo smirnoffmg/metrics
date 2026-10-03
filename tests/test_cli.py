@@ -345,6 +345,7 @@ def test_backtest_replays_issues_open_at_each_monday():
     assert "Baseline (all throughput to open issues): held 0 of" in result.output
     assert "85% of backlog done" not in report
     assert "<td>throughput, last 12 weeks, pace used</td>" in report
+    assert "Clear dates: " in result.output
 
 
 def test_cli_notes_no_share_for_a_forecast_it_does_not_make():

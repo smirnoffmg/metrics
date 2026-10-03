@@ -13,6 +13,8 @@ from metrics.entity import Issue
 from metrics.services.backtest import (
     Backtest,
     BacktestSummary,
+    DateCheck,
+    DateSummary,
     Moment,
     backtest_forecast,
     backtest_open_work,
@@ -20,6 +22,7 @@ from metrics.services.backtest import (
     bootstrap_totals,
     choose_pace,
     crps,
+    date_checks,
     forecast_open_work,
     judged_summary,
     kolmogorov_distance,
@@ -31,6 +34,7 @@ from metrics.services.backtest import (
     recalibration_helps,
     steady_bias,
     summarize_backtests,
+    summarize_date_checks,
     trend_values,
     window_share,
 )
@@ -709,3 +713,91 @@ def test_summary_counts_held_among_independent_forecasts():
     # 4-week horizons two weeks apart: forecasts 0, 2 and 4 are independent
     assert summary.independent == 3  # noqa: PLR2004
     assert summary.held_independent == 2  # noqa: PLR2004
+
+
+def _steady_clearing_world() -> list[tuple[str, int, int | None]]:
+    """Forty issues open from week 0, two done a week from week 1 to week 20."""
+    return [(f"OLD-{i}", 0, 1 + i // 2) for i in range(40)]
+
+
+def _checks(known_at, n_weeks: int, **kwargs) -> list[DateCheck]:
+    weeks = [_week_key(MONDAY + timedelta(weeks=i)) for i in range(n_weeks)]
+    return date_checks(
+        known_at,
+        weeks,
+        horizon=2,
+        pace=Pace(window=4),
+        min_history=4,
+        min_shares=4,
+        seed=1,
+        **kwargs,
+    )
+
+
+def test_date_check_holds_when_list_cleared_by_promise():
+    checks = _checks(_moment_known_at(_steady_clearing_world()), 30)
+    # windows 1..i-2 end by origin i: four of them first at week 6
+    assert checks[0].origin == MONDAY + timedelta(weeks=6)
+    # nothing is open from week 21 on, so nothing to promise
+    assert checks[-1].origin == MONDAY + timedelta(weeks=20)
+    cleared = MONDAY + timedelta(weeks=21)
+    assert all(check.promised == cleared for check in checks)
+    assert all(check.cleared_on == cleared for check in checks)
+
+
+def test_date_check_counts_dropped_issue_as_cleared():
+    world = [*_steady_clearing_world(), ("STUCK", 0, None)]
+    known_at = _moment_known_at(world)
+    dropped_on = MONDAY + timedelta(weeks=10)
+
+    def with_drop(at: datetime) -> Moment:
+        moment = known_at(at)
+        if at.date() < dropped_on:
+            return moment
+        return replace(moment, open_keys=moment.open_keys - {"STUCK"})
+
+    first = _checks(with_drop, 30)[0]
+    assert first.origin < dropped_on
+    assert first.cleared_on == MONDAY + timedelta(weeks=21)
+
+
+def test_date_promise_beyond_data_is_not_due():
+    checks = _checks(_moment_known_at(_steady_clearing_world()), 15)
+    assert checks
+    assert all(check.cleared_on is None for check in checks)
+    summary = summarize_date_checks(checks, last=MONDAY + timedelta(weeks=15))
+    assert summary == DateSummary(held=0, judged=0, not_due=len(checks))
+
+
+def test_date_promises_counted_only_when_intervals_do_not_overlap():
+    def check(origin: int, promised: int | None, cleared: int | None) -> DateCheck:
+        return DateCheck(
+            origin=MONDAY + timedelta(weeks=origin),
+            promised=None if promised is None else MONDAY + timedelta(weeks=promised),
+            cleared_on=None if cleared is None else MONDAY + timedelta(weeks=cleared),
+        )
+
+    checks = [
+        check(0, 5, 4),
+        check(1, 6, 7),
+        check(2, 7, 7),
+        check(5, 9, 11),
+        check(10, 12, 12),
+        check(11, 30, None),
+        check(12, None, None),
+    ]
+    summary = summarize_date_checks(checks, last=MONDAY + timedelta(weeks=20))
+    # due and apart: weeks 0..5, 5..9 and 10..12; the last two are not due
+    assert summary == DateSummary(held=2, judged=3, not_due=2)
+
+
+def test_no_date_promise_when_list_does_not_clear_within_cap():
+    # one old issue a week beside nine new ones: a hundred old need a hundred weeks
+    world: list[tuple[str, int, int | None]] = [
+        (f"OLD-{i}", 0, 1 + i) for i in range(30)
+    ]
+    world += [(f"OLD-{30 + i}", 0, None) for i in range(100)]
+    world += [(f"NEW-{w}-{n}", w, w) for w in range(1, 30) for n in range(9)]
+    checks = _checks(_moment_known_at(world), 30, max_weeks=20)
+    assert checks
+    assert all(check.promised is None for check in checks)

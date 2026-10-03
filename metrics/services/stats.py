@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
-    from .backtest import BacktestSummary
+    from .backtest import BacktestSummary, DateSummary
     from .calculator import BacklogFlow
 
 CLAIMED_CHANCE = 0.85
@@ -237,6 +237,21 @@ def recalibration_note(raw: BacktestSummary, recalibrated: BacktestSummary) -> s
         f" ({recalibrated.mean_crps:.1f} against {raw.mean_crps:.1f}),"
         f" so the forecast is {'' if helps else 'not '}recalibrated."
     )
+
+
+def date_check_note(summary: DateSummary) -> str:
+    """Say how past clear-date promises held, or that none has fallen due."""
+    if summary.judged:
+        return (
+            f"Clear dates: held {summary.held} of {summary.judged} independent"
+            f" past promises; {summary.not_due} not yet due."
+        )
+    if summary.not_due:
+        return (
+            f"Clear dates: 0 judged; all {summary.not_due} past promises"
+            " fall beyond the data so far."
+        )
+    return "Clear dates: too little history to replay past promises."
 
 
 def _horizons(summaries: Sequence[BacktestSummary]) -> str:

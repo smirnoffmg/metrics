@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 
 import pandas as pd
 
-from metrics.services.backtest import BacktestSummary
+from metrics.services.backtest import BacktestSummary, DateSummary
 from metrics.services.calculator import BacklogFlow
 from metrics.services.stats import (
     Tile,
@@ -15,6 +15,7 @@ from metrics.services.stats import (
     build_headline_tiles,
     build_stuck_rows,
     clear_date_tile,
+    date_check_note,
     diagnose_backtest,
     flow_tile,
     open_work_tile,
@@ -352,3 +353,22 @@ def test_recalibration_note_when_the_correction_scores_better():
         " promises instead of 51% and scored a better CRPS (37.6 against 40.2),"
         " so the forecast is recalibrated."
     )
+
+
+def test_date_check_note_says_none_judged_while_promises_are_not_due():
+    note = date_check_note(DateSummary(held=0, judged=0, not_due=74))
+    assert note == (
+        "Clear dates: 0 judged; all 74 past promises fall beyond the data so far."
+    )
+
+
+def test_date_check_note_reads_held_of_judged():
+    note = date_check_note(DateSummary(held=3, judged=4, not_due=10))
+    assert note == (
+        "Clear dates: held 3 of 4 independent past promises; 10 not yet due."
+    )
+
+
+def test_date_check_note_without_promises():
+    note = date_check_note(DateSummary(held=0, judged=0, not_due=0))
+    assert note == "Clear dates: too little history to replay past promises."

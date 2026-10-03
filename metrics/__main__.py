@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import sys
-from datetime import timedelta
+from datetime import date, timedelta
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -66,6 +66,7 @@ from metrics.services.backtest import (
     backtest_open_work,
     backtest_paces,
     choose_pace,
+    date_checks,
     forecast_open_work,
     judged_summary,
     moment_of,
@@ -73,6 +74,7 @@ from metrics.services.backtest import (
     recalibration_helps,
     steady_bias,
     summarize_backtests,
+    summarize_date_checks,
 )
 from metrics.services.calculator import (
     DEFAULT_PACE,
@@ -105,6 +107,7 @@ from metrics.services.stats import (
     build_delivery_tiles,
     build_headline_tiles,
     build_stuck_rows,
+    date_check_note,
     diagnose_backtest,
     recalibration_note,
     scope_forecast_tile,
@@ -793,6 +796,17 @@ def _forecast(
         vis_service,
         output_dir,
     )
+    checks = date_checks(
+        moment_at,
+        weeks,
+        horizon=horizon,
+        pace=pace,
+        seed=BACKTEST_SEED,
+    )
+    # the replay sees the list up to the Monday after the last complete week
+    last = date.fromisocalendar(int(weeks[-1][:4]), int(weeks[-1][5:]), 1)
+    summary = summarize_date_checks(checks, last + timedelta(weeks=1))
+    click.echo(date_check_note(summary))
     return pace, forecast, open_work, checked
 
 
