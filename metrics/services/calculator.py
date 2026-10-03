@@ -131,8 +131,14 @@ def history_start(issues: Sequence[Issue]) -> date | None:
 
 
 def weekly_arrivals(issues: Sequence[Issue], now: datetime) -> dict[str, int]:
-    """Count issues created per finished ISO week, up to the one before now."""
-    return weekly_counts([issue.created_at.date() for issue in issues], now)
+    """Count issues created per finished ISO week, up to the one before now.
+
+    Discarded issues are left out: they never reach the finishes either.
+    """
+    return weekly_counts(
+        [issue.created_at.date() for issue in issues if not issue.discarded],
+        now,
+    )
 
 
 @dataclass(frozen=True)

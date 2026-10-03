@@ -751,6 +751,29 @@ def test_report_method_says_when_the_share_of_finishes_was_assumed():
         assert note in method
 
 
+def test_cli_and_report_method_warn_of_a_bulk_closure():
+    bulk = [
+        _raw_issue(f"X-bulk-{n}", "Closed", ("2026-05-06", "Open", "Closed"))
+        for n in range(40)
+    ]
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
+        issues=[*_uneven_weeks_issues(), *bulk],
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(cli, ["--from-raw", "raw.json"])
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    method = report[report.index("<details") :]
+    warning = "Bulk closure: 2026W19 finished"
+    assert warning in result.output
+    assert warning in method
+
+
 def test_cli_refuses_a_forecast_query_the_snapshot_was_not_saved_with():
     snapshot = Snapshot(
         server="https://jira.example",

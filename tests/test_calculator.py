@@ -637,6 +637,20 @@ def test_weekly_arrivals_counts_created_per_week_excluding_current():
     assert result == {"2024W01": 2, "2024W02": 0}
 
 
+def test_weekly_arrivals_leave_out_discarded_issues():
+    def created(key: str, *, discarded: bool = False) -> Issue:
+        return Issue(
+            key=key,
+            status="Closed" if discarded else "New",
+            created_at=datetime(2024, 1, 2, tzinfo=UTC),
+            discarded=discarded,
+        )
+
+    issues = [created("A-1"), created("A-2", discarded=True)]
+    result = weekly_arrivals(issues, now=datetime(2024, 1, 10, tzinfo=UTC))
+    assert result == {"2024W01": 1}
+
+
 def test_backlog_flow_weighs_arrivals_and_finishes_by_pace():
     def issue(key: str, created: int, finished: int | None = None) -> Issue:
         # days of January 2024, which starts on a Monday

@@ -17,6 +17,7 @@ from metrics.services.stats import (
     build_delivery_tiles,
     build_headline_tiles,
     build_stuck_rows,
+    bulk_closure_note,
     clear_date_tile,
     date_check_note,
     diagnose_backtest,
@@ -400,6 +401,24 @@ def test_unmeasured_share_note_only_when_the_share_was_assumed():
     )
     assert unmeasured_share_note(_open_work(share_measured=True), "open issues") is None
     assert unmeasured_share_note({}, "open issues") is None
+
+
+def test_bulk_closure_note_names_a_week_over_five_times_the_median():
+    throughput = {f"2024W{w:02d}": 10 for w in range(1, 10)}
+    assert bulk_closure_note(throughput) is None
+    assert bulk_closure_note({**throughput, "2024W05": 50}) is None
+    note = bulk_closure_note({**throughput, "2024W05": 51, "2024W07": 400})
+    assert note == (
+        "Bulk closure: 2024W07 finished 400 issues, over 5 times the median week's"
+        " 10 (1 more such week); it inflates the pace. If these were not delivered,"
+        " add their resolution to --discarded-resolutions."
+    )
+
+
+def test_bulk_closure_note_without_a_typical_week():
+    # most weeks finish nothing: no median to measure a spike against
+    assert bulk_closure_note({"2024W01": 0, "2024W02": 0, "2024W03": 9}) is None
+    assert bulk_closure_note({}) is None
 
 
 def _dated_forecast(**changes) -> dict:

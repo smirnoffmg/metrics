@@ -486,6 +486,28 @@ def test_converter_accepts_custom_discarded_resolutions():
     assert JiraDataConverter().convert_data_to_issue(data_item).was_done
 
 
+def test_converter_discards_tracker_triage_closures_by_default():
+    # names as CONFSERVER and NIFI spell them, in any case
+    for resolution in (
+        "Low Engagement",
+        "Timed out",
+        "OBSOLETE",
+        "Tracked Elsewhere",
+        "Handled by Support",
+        "Feedback Received",
+        "Information Provided",
+        "later",
+    ):
+        issue = JiraDataConverter().convert_data_to_issue(
+            _issue_moving_through(
+                ("2024-01-05", "Open", "Closed"),
+                resolution=resolution,
+            ),
+        )
+        assert issue.discarded, resolution
+        assert not issue.was_done, resolution
+
+
 def _issue_through_ids(*steps: tuple[str, str, str], current: str) -> dict:
     """Like _issue_moving_through, with status ids as Jira sends them."""
     raw = _issue_moving_through(*steps)

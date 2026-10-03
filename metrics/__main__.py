@@ -117,6 +117,7 @@ from metrics.services.stats import (
     build_delivery_tiles,
     build_headline_tiles,
     build_stuck_rows,
+    bulk_closure_note,
     date_check_note,
     diagnose_backtest,
     forecast_verdict,
@@ -800,7 +801,13 @@ def calculate_metrics(  # noqa: PLR0913
         agent_comparison=comparison,
         backtests=backtests,
         used_model=used_model,
-        backtest_note=_method_note(backtest_note, dates, open_work, scope_open_work),
+        backtest_note=_method_note(
+            backtest_note,
+            dates,
+            open_work,
+            scope_open_work,
+            throughput,
+        ),
         verdict=verdict,
         method_images=[backtest_chart] if backtest_chart else [],
         delivery_tiles=delivery_tiles,
@@ -814,12 +821,14 @@ def _method_note(
     dates: DateSummary | None,
     open_work: dict[str, Any],
     scope_open_work: dict[str, Any],
+    throughput: dict[str, int],
 ) -> str | None:
     share_notes = (
         ("Forecast", unmeasured_share_note(open_work, "open issues")),
         ("Scope", unmeasured_share_note(scope_open_work, "its open issues")),
     )
     parts = (
+        bulk_closure_note(throughput),
         backtest_note,
         date_check_note(dates) if dates else None,
         *(f"{label}: {note}." for label, note in share_notes if note),
@@ -848,6 +857,8 @@ def _forecast(  # noqa: PLR0913
     """
     now = repo.snapshot.fetched_at
     weeks = list(throughput)
+    if bulk := bulk_closure_note(throughput):
+        click.echo(bulk)
     if not any(issue.is_open for issue in issues):
         return DEFAULT_PACE, {}, {}, None, None
     pace, moment_at, runs = _choose_forecast_pace(repo, throughput, since)

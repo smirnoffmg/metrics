@@ -29,6 +29,7 @@ CLAIMED_CHANCE = 0.85
 # A week's arrivals and finishes vary by several issues, so a smaller gap
 # between their averages is not evidence that either side is ahead.
 FLOW_NOISE = 0.1
+BULK_CLOSURE_FACTOR = 5
 
 
 @dataclass(frozen=True)
@@ -520,6 +521,29 @@ def unmeasured_share_note(open_work: dict[str, Any], subject: str) -> str | None
     return (
         f"share of finishes going to {subject} not measured"
         f" (too few past {open_work['horizon']}-week windows); assuming all of them"
+    )
+
+
+def bulk_closure_note(throughput: dict[str, int]) -> str | None:
+    """Name the biggest week finishing over BULK_CLOSURE_FACTOR times the median."""
+    typical = median(throughput.values()) if throughput else 0
+    if not typical:
+        return None
+    bulk = sorted(
+        (count, week)
+        for week, count in throughput.items()
+        if count > BULK_CLOSURE_FACTOR * typical
+    )
+    if not bulk:
+        return None
+    count, week = bulk[-1]
+    more = len(bulk) - 1
+    also = f" ({more} more such week{'s' if more > 1 else ''})" if more else ""
+    return (
+        f"Bulk closure: {week} finished {count} issues, over {BULK_CLOSURE_FACTOR}"
+        f" times the median week's {typical:g}{also}; it inflates the pace."
+        " If these were not delivered, add their resolution to"
+        " --discarded-resolutions."
     )
 
 
