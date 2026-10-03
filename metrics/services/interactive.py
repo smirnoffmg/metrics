@@ -120,6 +120,8 @@ class InteractiveVisService(BaseService):
             ),
         )
         for pct, dash in zip(PERCENTILES, LINE_DASHES, strict=True):
+            if result[f"p{pct}"] is None:
+                continue
             fig.add_vline(
                 x=result[f"p{pct}"],
                 line_dash=dash,

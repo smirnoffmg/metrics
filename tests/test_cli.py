@@ -283,6 +283,29 @@ def test_cli_forecasts_the_scope_saved_in_a_snapshot():
     assert "fixVersion = 7.2" in report
 
 
+def test_cli_reports_a_list_that_does_not_clear_within_two_years():
+    never_cleared = [_raw_issue(f"X-{100 + i}", "Open") for i in range(300)]
+    snapshot = Snapshot(
+        server="https://jira.example",
+        jql="project = X",
+        fetched_at=datetime(2026, 9, 15, tzinfo=UTC),
+        issues=_finished_and_open_issues() + never_cleared,
+        forecast_jql="fixVersion = 7.2",
+        forecast_issues=never_cleared,
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        save_snapshot(snapshot, Path("raw.json"))
+        result = runner.invoke(
+            cli,
+            ["--from-raw", "raw.json", "--forecast-focus", "0.5"],
+        )
+        assert result.exit_code == 0, result.output
+        report = Path("output/report.html").read_text()
+    assert "not within 2 years" in result.output
+    assert "not within 2 years" in report
+
+
 def test_cli_refuses_a_forecast_query_the_snapshot_was_not_saved_with():
     snapshot = Snapshot(
         server="https://jira.example",

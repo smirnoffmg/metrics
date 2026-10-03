@@ -73,6 +73,8 @@ def _forecast_tile(forecast: dict[str, Any], label: str) -> Tile:
         return Tile(label, "n/a")
     if forecast.get("recalibrated"):
         label = f"{label}, recalibrated"
+    if forecast["p85_date"] is None:
+        return Tile(label, "not within 2 years")
     return Tile(label, f"by {forecast['p85_date']:%d %b %Y}")
 
 

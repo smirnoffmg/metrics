@@ -342,15 +342,18 @@ class VisService(BaseService):
             align="left",
             color=SERIES,
         )
-        self._percentile_lines(
-            ax,
-            [result[f"p{p}"] for p in PERCENTILES],
-            [
-                f"p{p} = {result[f'p{p}']:.0f}w (by {result[f'p{p}_date']:%d %b %Y})"
-                for p in PERCENTILES
-            ],
-            vertical=True,
-        )
+        dated = [p for p in PERCENTILES if result[f"p{p}"] is not None]
+        if dated:
+            self._percentile_lines(
+                ax,
+                [result[f"p{p}"] for p in dated],
+                [
+                    f"p{p} = {result[f'p{p}']:.0f}w"
+                    f" (by {result[f'p{p}_date']:%d %b %Y})"
+                    for p in dated
+                ],
+                vertical=True,
+            )
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         ax.set_xlabel("weeks to complete backlog")
         ax.set_ylabel("simulations")

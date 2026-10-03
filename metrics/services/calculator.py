@@ -29,6 +29,8 @@ MIN_FORECAST_HISTORY_WEEKS: Final[int] = 6
 # enough that a team's pace from years ago doesn't forecast today's backlog.
 FORECAST_WINDOW_WEEKS: Final[int] = 12
 CFD_MAX_DAILY_SPAN: Final[int] = 180
+# Two years: a list that won't clear by then gets no date rather than a far one.
+MAX_FORECAST_WEEKS: Final[int] = 104
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,11 @@ def weekly_throughput(
     return weekly_counts(finished, now)
 
 
+def weekly_arrivals(issues: Sequence[Issue], now: datetime) -> dict[str, int]:
+    """Count issues created per finished ISO week, up to the one before now."""
+    return weekly_counts([issue.created_at.date() for issue in issues], now)
+
+
 def weekly_counts(days: list[date], now: datetime | None = None) -> dict[str, int]:
     """Count days per finished ISO week, from the first up to the week before now."""
     now = now or datetime.now(tz=UTC)
@@ -173,6 +180,35 @@ def cycle_time_points(issues: Sequence[Issue]) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["key", "finished_at", "cycle_time_days"])
 
 
+def burndown(  # noqa: PLR0913
+    n_open: int,
+    throughput: Sequence[float],
+    rng: np.random.Generator,
+    *,
+    weeks: int,
+    pace: Pace = DEFAULT_PACE,
+    shares: Sequence[float] = (1.0,),
+    focus: float = 1.0,
+    simulations: int = 10_000,
+) -> np.ndarray:
+    """Issues of an open list done by the end of each week, one row per run.
+
+    Each run draws its share of finishes that go to the list once, since a
+    team's mix of old and new work holds for a while rather than week to week.
+    """
+    samples, chances = pace_draws(throughput, pace)
+    draws = rng.choice(samples, size=(simulations, weeks), p=chances)
+    share = rng.choice(np.asarray(shares, dtype=float), size=(simulations, 1))
+    done = np.floor(draws.cumsum(axis=1) * share * focus)
+    return np.minimum(done, n_open).astype(np.int64)
+
+
+def weeks_to_clear(done: np.ndarray, n_open: int) -> np.ndarray:
+    """First week each run reaches the open count; one past the last if never."""
+    cleared = done >= n_open
+    return np.where(cleared.any(axis=1), cleared.argmax(axis=1) + 1, done.shape[1] + 1)
+
+
 def monte_carlo_forecast(  # noqa: PLR0913
     issues: Sequence[Issue],
     throughput: dict[str, int],
@@ -181,33 +217,48 @@ def monte_carlo_forecast(  # noqa: PLR0913
     now: datetime | None = None,
     focus: float = 1.0,
     pace: Pace = DEFAULT_PACE,
+    shares: Sequence[float] = (1.0,),
+    max_weeks: int = MAX_FORECAST_WEEKS,
 ) -> dict[str, Any]:
     """Simulate clearing the open issues; empty dict when data is insufficient.
 
     focus is the share of the team's throughput spent on these issues: a
     release worked on alongside everything else gets only part of it.
     pace is which past weeks of throughput the simulation draws from.
+    shares are past shares of finishes that went to issues already open.
     """
     if not 0 < focus <= 1:
         msg = f"focus must be in (0, 1], got {focus}"
         raise ValueError(msg)
     now = now or datetime.now(tz=UTC)
     weekly = list(throughput.values())
-    samples, chances = pace_draws(weekly, pace)
-    samples = samples * focus
+    samples, _ = pace_draws(weekly, pace)
     backlog = sum(1 for issue in issues if issue.is_open)
     if backlog == 0 or len(samples) < MIN_FORECAST_HISTORY_WEEKS or samples.sum() == 0:
         return {}
-    rng = np.random.default_rng(seed)
-    weeks = np.zeros(simulations, dtype=np.int64)
-    remaining = np.full(simulations, float(backlog))
-    active = remaining > 0
-    while active.any():
-        remaining[active] -= rng.choice(samples, size=int(active.sum()), p=chances)
-        weeks[active] += 1
-        active = remaining > 0
+    done = burndown(
+        backlog,
+        weekly,
+        np.random.default_rng(seed),
+        weeks=max_weeks,
+        pace=pace,
+        shares=shares,
+        focus=focus,
+        simulations=simulations,
+    )
+    weeks = weeks_to_clear(done, backlog)
     return _with_percentiles(
-        {"weeks": weeks, "backlog": backlog, "focus": focus, "pace": pace},
+        {
+            "weeks": weeks,
+            "backlog": backlog,
+            "focus": focus,
+            "pace": pace,
+            "max_weeks": max_weeks,
+            "cleared": float(np.mean(weeks <= max_weeks)),
+            "share": float(np.median(shares)),
+            "done_p50": np.percentile(done, 50, axis=0),
+            "done_at_least_85": np.percentile(done, 15, axis=0, method="lower"),
+        },
         now,
     )
 
@@ -236,8 +287,11 @@ def recalibrate_forecast(
 def _with_percentiles(result: dict[str, Any], now: datetime) -> dict[str, Any]:
     for pct in (50, 85, 95):
         value = float(np.percentile(result["weeks"], pct))
-        result[f"p{pct}"] = value
-        result[f"p{pct}_date"] = (now + timedelta(weeks=value)).date()
+        if value > result["max_weeks"]:
+            result[f"p{pct}"] = result[f"p{pct}_date"] = None
+        else:
+            result[f"p{pct}"] = value
+            result[f"p{pct}_date"] = (now + timedelta(weeks=value)).date()
     return result
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -11,6 +12,7 @@ from metrics.entity.issues import Issue, StatusTransition
 from metrics.services.calculator import (
     Pace,
     aging_wip,
+    burndown,
     cumulative_flow,
     cycle_time_points,
     cycle_times,
@@ -23,7 +25,9 @@ from metrics.services.calculator import (
     queue_times,
     recalibrate_forecast,
     returns_to_testing,
+    weekly_arrivals,
     weekly_throughput,
+    weeks_to_clear,
 )
 
 
@@ -493,3 +497,95 @@ def test_recalibrated_forecast_after_optimistic_past_takes_longer():
     )
     assert result["p50"] == float(raw["weeks"].max())
     assert result["p50_date"] > raw["p85_date"]
+
+
+def test_burndown_never_exceeds_open_count_and_never_falls():
+    done = burndown(
+        10,
+        [0, 3, 7, 12],
+        np.random.default_rng(1),
+        weeks=8,
+        shares=(0.3, 1.0),
+        simulations=500,
+    )
+    assert done.shape == (500, 8)
+    assert done.max() <= 10  # noqa: PLR2004
+    assert (np.diff(done, axis=1) >= 0).all()
+
+
+def test_burndown_scales_throughput_by_share():
+    done = burndown(
+        100,
+        [4] * 6,
+        np.random.default_rng(1),
+        weeks=5,
+        shares=(0.5,),
+        simulations=10,
+    )
+    assert done[0].tolist() == [2, 4, 6, 8, 10]
+
+
+def test_weeks_to_clear_marks_runs_that_never_clear_past_the_last_week():
+    done = np.array([[1, 3, 3], [2, 2, 2]])
+    assert weeks_to_clear(done, 3).tolist() == [2, 4]
+
+
+def test_monte_carlo_forecast_full_share_clears_like_before():
+    throughput = {f"2024W{w:02d}": 5 for w in range(1, 13)}
+    result = monte_carlo_forecast(
+        _open_issues(20),
+        throughput,
+        simulations=200,
+        seed=1,
+        now=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    assert result["p85"] == 4.0  # noqa: PLR2004
+    assert result["cleared"] == 1.0
+    assert result["share"] == 1.0
+    assert result["done_p50"][:4].tolist() == [5, 10, 15, 20]
+    assert result["done_at_least_85"][3] == 20  # noqa: PLR2004
+
+
+def test_monte_carlo_forecast_with_shares_takes_longer():
+    throughput = {f"2024W{w:02d}": 5 for w in range(1, 13)}
+    result = monte_carlo_forecast(
+        _open_issues(20),
+        throughput,
+        simulations=200,
+        seed=1,
+        now=datetime(2026, 7, 15, tzinfo=UTC),
+        shares=(0.5,),
+    )
+    assert result["p85"] == 8.0  # noqa: PLR2004
+    assert result["share"] == 0.5  # noqa: PLR2004
+
+
+def test_monte_carlo_forecast_reports_no_date_when_list_does_not_clear_within_cap():
+    throughput = {f"2024W{w:02d}": 5 for w in range(1, 13)}
+    result = monte_carlo_forecast(
+        _open_issues(20),
+        throughput,
+        simulations=200,
+        seed=1,
+        now=datetime(2026, 7, 15, tzinfo=UTC),
+        shares=(0.05,),
+        max_weeks=10,
+    )
+    assert result["p85"] is None
+    assert result["p85_date"] is None
+    assert result["cleared"] < 0.85  # noqa: PLR2004
+    assert len(result["done_p50"]) == 10  # noqa: PLR2004
+
+
+def test_weekly_arrivals_counts_created_per_week_excluding_current():
+    def created(day: int) -> Issue:
+        return Issue(
+            key=f"C-{day}",
+            status="New",
+            created_at=datetime(2024, 1, day, tzinfo=UTC),
+        )
+
+    # 2024-01-01 is a Monday; the 16th and 17th fall in the current week
+    issues = [created(1), created(3), created(16), created(17)]
+    result = weekly_arrivals(issues, now=datetime(2024, 1, 17, tzinfo=UTC))
+    assert result == {"2024W01": 2, "2024W02": 0}

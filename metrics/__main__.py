@@ -813,8 +813,8 @@ def _report_backtest(  # noqa: PLR0913
     applied = bool(forecast.get("recalibrated"))
     used_runs = recalibrated if applied and recalibrated is not None else runs[pace]
     used_model = f"{pace.label}, recalibrated" if applied else pace.label
-    horizon = max(1, round(forecast["p85"]))
-    if horizon not in used_runs:
+    horizon = None if forecast["p85"] is None else max(1, round(forecast["p85"]))
+    if horizon is not None and horizon not in used_runs:
         used_runs[horizon] = backtest_forecast(
             throughput_at,
             weeks,
@@ -836,7 +836,7 @@ def _report_backtest(  # noqa: PLR0913
             f" over {h} weeks held ({summary.independent} independent);"
             f" Kolmogorov distance {summary.kolmogorov:.2f}",
         )
-    if horizon not in summaries:
+    if horizon is not None and horizon not in summaries:
         click.echo(f"Backtest: too little history for {horizon}-week forecasts")
     judged = judged_summary(list(summaries.values()))
     if judged is None:
@@ -926,7 +926,9 @@ def _forecast_scope(  # noqa: PLR0913
     open_count = sum(1 for issue in scope if issue.is_open)
     # the query on its own line: a chart title cannot fit a long one beside the rest
     summary = f"{jql}\n{open_count} of {len(scope)} issues open"
-    if result:
+    if result and result["p85_date"] is None:
+        summary += f"; not within 2 years at {focus:.0%} of throughput"
+    elif result:
         summary += (
             f"; 85% chance done by {result['p85_date']:%d %b %Y}"
             f" at {focus:.0%} of throughput"
