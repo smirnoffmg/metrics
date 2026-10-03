@@ -126,6 +126,20 @@ def biggest_drop(df: pd.DataFrame) -> tuple[Any, str, int] | None:
     return best
 
 
+def fan_lines(result: dict[str, Any]) -> tuple[list[int], list[float], list[float]]:
+    """Weeks from now and today's open issues left, at the median and at 85%.
+
+    The weeks stop a little past the 85% line reaching zero, so a list cleared
+    in weeks is not drawn flat across the two simulated years.
+    """
+    backlog = result["backlog"]
+    median_left = [backlog, *(backlog - d for d in result["done_p50"])]
+    left_85 = [backlog, *(backlog - d for d in result["done_at_least_85"])]
+    still_open = [week for week, left in enumerate(left_85) if left > 0]
+    end = min(len(left_85), (still_open[-1] if still_open else 0) + 3)
+    return list(range(end)), median_left[:end], left_85[:end]
+
+
 class VisService(BaseService):
     """Renders and saves metric charts as PNG images."""
 
@@ -331,33 +345,50 @@ class VisService(BaseService):
         filename: str,
         result: dict[str, Any],
         title: str | None = None,
+        promise: tuple[int, float] | None = None,
     ) -> None:
-        """Render the Monte Carlo weeks-to-complete histogram."""
+        """Render issues of today's list still open week by week, as a fan."""
         fig, ax = plt.subplots()
-        weeks = result["weeks"]
-        ax.hist(
-            weeks,
-            bins=range(int(weeks.min()), int(weeks.max()) + 2),
-            rwidth=0.9,
-            align="left",
-            color=SERIES,
+        weeks, median_left, left_85 = fan_lines(result)
+        ax.fill_between(weeks, median_left, left_85, color=SERIES, alpha=0.12)
+        ax.plot(
+            weeks, left_85, color=SERIES, linewidth=2, label="85% chance of at most"
         )
-        dated = [p for p in PERCENTILES if result[f"p{p}"] is not None]
-        if dated:
-            self._percentile_lines(
-                ax,
-                [result[f"p{p}"] for p in dated],
-                [
-                    f"p{p} = {result[f'p{p}']:.0f}w"
-                    f" (by {result[f'p{p}_date']:%d %b %Y})"
-                    for p in dated
-                ],
-                vertical=True,
+        ax.plot(
+            weeks,
+            median_left,
+            color=INK_SECONDARY,
+            linestyle="--",
+            linewidth=1.5,
+            label="50% chance of at most",
+        )
+        if promise is not None and promise[0] < len(weeks):
+            horizon, left = promise[0], result["backlog"] - promise[1]
+            ax.scatter([horizon], [left], color=SERIES, s=50, zorder=3)
+            ax.annotate(
+                f"in {horizon} weeks",
+                (horizon, left),
+                textcoords="offset points",
+                xytext=(8, -8),
+                va="top",
+                color=INK_SECONDARY,
             )
+        if result["p85"] is not None:
+            ax.axvline(
+                result["p85"],
+                linestyle=":",
+                color=INK_SECONDARY,
+                linewidth=1.5,
+                label=f"all done by {result['p85_date']:%d %b %Y} (85%)",
+            )
+        ax.set_ylim(bottom=0)
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.set_xlabel("weeks to complete backlog")
-        ax.set_ylabel("simulations")
-        ax.set_title(title or f"Monte Carlo Forecast ({result['backlog']} open issues)")
+        ax.set_xlabel("weeks from now")
+        ax.set_ylabel("issues from today's list still open")
+        ax.set_title(
+            title or f"How many of the {result['backlog']} open issues stay open",
+        )
+        ax.legend()
         self._save_figure(fig, filename)
 
     def vis_backtest(

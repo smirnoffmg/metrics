@@ -6,10 +6,11 @@ from datetime import UTC, date, datetime
 
 import pandas as pd
 
-from metrics.services.backtest import BacktestSummary, DateSummary
+from metrics.services.backtest import BacktestSummary, DateSummary, ScopeResult
 from metrics.services.calculator import BacklogFlow
 from metrics.services.stats import (
     Tile,
+    Trust,
     backtest_tile,
     build_delivery_tiles,
     build_headline_tiles,
@@ -18,9 +19,12 @@ from metrics.services.stats import (
     date_check_note,
     diagnose_backtest,
     flow_tile,
+    forecast_verdict,
     open_work_tile,
     recalibration_note,
     scope_forecast_tile,
+    scope_verdict,
+    trust,
 )
 
 
@@ -381,3 +385,244 @@ def test_date_check_note_reads_held_of_judged():
 def test_date_check_note_without_promises():
     note = date_check_note(DateSummary(held=0, judged=0, not_due=0))
     assert note == "Clear dates: too little history to replay past promises."
+
+
+def _dated_forecast(**changes) -> dict:
+    return {"backlog": 151, "p85": 30.0, "p85_date": date(2024, 7, 1), **changes}
+
+
+def test_trust_reads_held_of_independent_promises():
+    assert trust(_summary(11, independent=12)) == Trust("holds", 11, 12)
+    assert trust(_summary(9, independent=12)) == Trust("optimistic", 9, 12)
+    assert trust(_summary(3, independent=3)) == Trust("unchecked", 3, 3)
+    assert trust(None) == Trust("unchecked", 0, 0)
+
+
+def test_forecast_verdict_says_commit_when_held_as_promised():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("holds", 17, 20),
+        BacklogFlow(arrived=20.0, finished=24.0),
+        DateSummary(held=0, judged=0, not_due=74),
+    )
+    assert verdict[0] == (
+        "At least 31 of the 151 open issues will be done in 8 weeks,"
+        " by 01 Mar 2024 (85% chance)."
+    )
+    assert "held 17 of 20 times" in verdict[1]
+    assert "20.0 issues arrive and 24.0 get done a week" in " ".join(verdict)
+    assert verdict[-1].startswith("Commit to the number")
+
+
+def test_forecast_verdict_says_optimistic_when_fewer_held():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("optimistic", 12, 20),
+        None,
+        None,
+    )
+    assert "held only 12 of 20 times" in verdict[1]
+    assert "optimistic" in verdict[-1]
+    assert "Commit to the number" not in verdict[-1]
+
+
+def test_forecast_verdict_says_too_little_history():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("unchecked", 2, 3),
+        None,
+        None,
+    )
+    assert "too little history" in verdict[1]
+    assert "guess" in verdict[-1]
+
+
+def test_forecast_verdict_advises_against_a_date_when_arrivals_outpace_finishes():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(p85=None, p85_date=None),
+        Trust("holds", 17, 20),
+        BacklogFlow(arrived=30.0, finished=24.0),
+        DateSummary(held=0, judged=0, not_due=74),
+    )
+    text = " ".join(verdict)
+    assert "Not all 151 open issues will be done within 2 years" in text
+    assert "more arrive than get done" in text
+    assert "don't promise a date for all of it" in verdict[-1]
+    assert "--forecast-jql" in verdict[-1]
+
+
+def test_forecast_verdict_without_a_forecast():
+    assert forecast_verdict({}, {}, trust(None), None, None) == [
+        "No forecast: no open issues, or fewer than 6 weeks of finished work.",
+    ]
+
+
+def test_verdict_has_no_method_jargon():
+    verdicts = [
+        forecast_verdict(
+            _open_work(recalibrated=True),
+            _dated_forecast(p85=None, p85_date=None),
+            Trust(word, 12, 20),
+            BacklogFlow(arrived=30.0, finished=24.0),
+            DateSummary(held=3, judged=4, not_due=10),
+        )
+        for word in ("holds", "optimistic", "unchecked")
+    ]
+    verdicts.append(
+        scope_verdict(
+            "fixVersion = 7.2",
+            ScopeResult(
+                _dated_forecast(backlog=10),
+                _open_work(n_open=10, at_least_85=8.0),
+                {},
+                None,
+                "measured",
+            ),
+            Trust("holds", 11, 12),
+        ),
+    )
+    text = " ".join(" ".join(verdict) for verdict in verdicts)
+    for jargon in ("CRPS", "u-plot", "y-plot", "Kolmogorov", "p =", "percentile"):
+        assert jargon not in text
+
+
+def test_scope_verdict_reads_the_release_date_and_its_trust():
+    verdict = scope_verdict(
+        "fixVersion = 7.2",
+        ScopeResult(
+            _dated_forecast(backlog=10),
+            _open_work(n_open=10, at_least_85=8.0),
+            {},
+            None,
+            "measured",
+        ),
+        Trust("holds", 11, 12),
+    )
+    assert verdict[0] == (
+        "Release fixVersion = 7.2: at least 8 of its 10 open issues done"
+        " in 8 weeks, by 01 Mar 2024 (85% chance), paced by its own finishes."
+    )
+    assert "held 11 of 12 times" in verdict[1]
+    assert verdict[2] == (
+        "All 10 of its open issues done by 01 Jul 2024 (85% chance);"
+        " no past date like it has come due to check it."
+    )
+
+
+def test_scope_verdict_does_not_lend_the_replayed_trust_to_its_date():
+    verdict = scope_verdict(
+        "fixVersion = 7.2",
+        ScopeResult(
+            _dated_forecast(backlog=10),
+            _open_work(n_open=10, at_least_85=8.0),
+            {},
+            DateSummary(held=0, judged=0, not_due=12),
+            "measured",
+        ),
+        Trust("holds", 11, 12),
+    )
+    promise, trusted, date_line = verdict
+    # the trust sentence follows the replayed promise, never the extrapolated date
+    assert "8 of its 10 open issues done in 8 weeks" in promise
+    assert "01 Jul 2024" not in promise
+    assert "like this one held 11 of 12 times" in trusted
+    assert "01 Jul 2024" in date_line
+    assert "no past date like it has come due" in date_line
+
+
+def test_scope_verdict_says_an_assumed_share_is_not_checked():
+    verdict = scope_verdict(
+        "fixVersion = 7.2",
+        ScopeResult(
+            _dated_forecast(backlog=10, p85=None, p85_date=None),
+            {},
+            {},
+            None,
+            "assumed",
+        ),
+        trust(None),
+    )
+    assert "not within 2 years" in verdict[0]
+    assert "assumed share of the team's time" in verdict[0]
+    assert "not checked" in verdict[1]
+
+
+def test_forecast_verdict_puts_the_release_before_the_action():
+    release = ["Release fixVersion = 7.2: all 10 open issues done by 01 Jul 2024."]
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(p85=None, p85_date=None),
+        Trust("unchecked", 2, 3),
+        BacklogFlow(arrived=30.0, finished=24.0),
+        None,
+        release,
+    )
+    assert verdict[-2] == release[0]
+    assert "guess" in verdict[-1]
+    assert "don't promise a date for all of it" in verdict[-1]
+    # the release is already scoped, so advising to scope one is noise
+    assert "--forecast-jql" not in " ".join(verdict)
+
+
+def test_forecast_verdict_still_reads_the_release_without_a_forecast():
+    release = ["Release fixVersion = 7.2: nothing left to forecast."]
+    assert (
+        forecast_verdict({}, {}, trust(None), None, None, release)[-1] == (release[0])
+    )
+
+
+def test_forecast_verdict_with_no_flow_does_not_say_more_arrive():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("holds", 17, 20),
+        BacklogFlow(arrived=0.0, finished=0.0),
+        None,
+    )
+    assert "more arrive than get done" not in " ".join(verdict)
+    assert "don't promise" not in verdict[-1]
+
+
+def test_forecast_verdict_does_not_vouch_for_a_date_from_too_few_checks():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("holds", 17, 20),
+        None,
+        DateSummary(held=1, judged=1, not_due=10),
+    )
+    text = " ".join(verdict)
+    assert "held 1 of 1" not in text
+    assert "only 1 past date like it has come due" in text
+
+
+def test_scope_verdict_names_the_assumed_share_once():
+    verdict = scope_verdict(
+        "fixVersion = 7.2",
+        ScopeResult(
+            _dated_forecast(backlog=10),
+            {},
+            {},
+            None,
+            "assumed",
+        ),
+        trust(None),
+    )
+    assert " ".join(verdict).count("assumed share") == 1
+
+
+def test_forecast_verdict_flow_keeps_the_decimal_that_decides_behind():
+    verdict = forecast_verdict(
+        _open_work(),
+        _dated_forecast(),
+        Trust("holds", 17, 20),
+        BacklogFlow(arrived=5.4, finished=4.6),
+        None,
+    )
+    assert (
+        "About 5.4 issues arrive and 4.6 get done a week; more arrive than get done."
+    ) in verdict

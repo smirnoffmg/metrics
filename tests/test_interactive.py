@@ -60,10 +60,13 @@ def test_cfd_fragment_contains_statuses():
     assert "In Progress" in fragment
 
 
-def test_forecast_fragment_contains_percentiles():
-    result = {
+def _fan_forecast() -> dict:
+    return {
         "weeks": np.array([3, 4, 5]),
         "backlog": 7,
+        "max_weeks": 6,
+        "done_p50": np.array([2.0, 4.0, 6.0, 7.0, 7.0, 7.0]),
+        "done_at_least_85": np.array([1.0, 3.0, 4.0, 6.0, 7.0, 7.0]),
         "p50": 4.0,
         "p50_date": date(2026, 8, 12),
         "p85": 5.0,
@@ -71,8 +74,27 @@ def test_forecast_fragment_contains_percentiles():
         "p95": 5.0,
         "p95_date": date(2026, 8, 19),
     }
+
+
+def test_forecast_fragment_draws_open_issues_left_week_by_week():
+    fragment = _service().forecast_fragment(_fan_forecast(), promise=(4, 6.0))
+    assert "weeks from now" in fragment
+    assert "issues from today's list still open" in fragment
+    assert "85% chance of at most" in fragment
+    assert "all done by 19 Aug 2026" in fragment
+    assert "in 4 weeks" in fragment
+
+
+def test_forecast_fragment_marks_the_promised_number_not_the_fan():
+    # the headline may be recalibrated, so the fan's own 85% line can differ
+    fragment = _service().forecast_fragment(_fan_forecast(), promise=(4, 2.0))
+    assert '"x":[4],"y":[5.0]' in fragment
+
+
+def test_forecast_fragment_says_when_the_list_does_not_clear():
+    result = {**_fan_forecast(), "p85": None, "p85_date": None}
     fragment = _service().forecast_fragment(result)
-    assert "p85" in fragment
+    assert "all done by" not in fragment
 
 
 def test_aging_fragment_contains_keys_and_links():

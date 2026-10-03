@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from statistics import fmean, median
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from .backtest import (
     MIN_INDEPENDENT_OUTCOMES,
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
-    from .backtest import BacktestSummary, DateSummary
+    from .backtest import BacktestSummary, DateSummary, ScopeResult
     from .calculator import BacklogFlow
 
 CLAIMED_CHANCE = 0.85
@@ -35,6 +35,15 @@ class Tile:
     value: str
     delta_text: str | None = None
     delta_good: bool | None = None
+
+
+@dataclass(frozen=True)
+class Trust:
+    """How far past promises like the forecast's came true, in plain words."""
+
+    word: Literal["holds", "optimistic", "unchecked"]
+    held: int
+    of: int
 
 
 @dataclass(frozen=True)
@@ -199,6 +208,140 @@ def backtest_tile(summary: BacktestSummary | None) -> Tile:
         "as promised" if held else "fewer than promised",
         held,
     )
+
+
+def trust(summary: BacktestSummary | None) -> Trust:
+    """Judge past promises held among those not overlapping, as backtest_tile does."""
+    if summary is None:
+        return Trust("unchecked", 0, 0)
+    held, of = summary.held_independent, summary.independent
+    if of < MIN_INDEPENDENT_OUTCOMES:
+        return Trust("unchecked", held, of)
+    return Trust("holds" if held / of >= CLAIMED_CHANCE else "optimistic", held, of)
+
+
+def forecast_verdict(  # noqa: PLR0913
+    open_work: dict[str, Any],
+    forecast: dict[str, Any],
+    trust: Trust,
+    flow: BacklogFlow | None,
+    dates: DateSummary | None,
+    release: Sequence[str] = (),
+) -> list[str]:
+    """Say what to expect of the open issues, how far to trust it and what to do.
+
+    Natural frequencies ("held 17 of 20 times") rather than percentages, and
+    an action last, so the page answers whether to act before any chart.
+    The release's lines go just before the action.
+    """
+    if not open_work or not forecast:
+        return [
+            "No forecast: no open issues, or fewer than 6 weeks of finished work.",
+            *release,
+        ]
+    verdict = [
+        f"At least {open_work['at_least_85']:.0f} of the {open_work['n_open']}"
+        f" open issues will be done in {open_work['horizon']} weeks,"
+        f" by {open_work['by_date']:%d %b %Y} (85% chance).",
+        _trust_sentence(trust, open_work["horizon"]),
+    ]
+    behind = (
+        flow is not None and flow.net > 0 and flow.net >= FLOW_NOISE * flow.finished
+    )
+    if flow is not None:
+        verdict.append(
+            f"About {flow.arrived:.1f} issues arrive and {flow.finished:.1f}"
+            " get done a week" + ("; more arrive than get done." if behind else "."),
+        )
+    verdict.append(_clear_date_sentence(forecast, dates))
+    verdict += release
+    action = _ACTIONS[trust.word]
+    if behind or forecast["p85_date"] is None:
+        action = f"{action[:-1]}, but don't promise a date for all of it" + (
+            "." if release else "; scope a release with --forecast-jql."
+        )
+    verdict.append(action)
+    return verdict
+
+
+_ACTIONS: dict[str, str] = {
+    "holds": "Commit to the number.",
+    "optimistic": "Treat the number as optimistic and commit to fewer.",
+    "unchecked": "Treat the number as a guess until more history builds up.",
+}
+
+
+def _trust_sentence(trust: Trust, horizon: int) -> str:
+    if trust.word == "holds":
+        return (
+            f"Past {horizon}-week promises like this one"
+            f" held {trust.held} of {trust.of} times."
+        )
+    if trust.word == "optimistic":
+        return (
+            f"Past {horizon}-week promises like this one held only"
+            f" {trust.held} of {trust.of} times, fewer than the 85% promised."
+        )
+    return (
+        f"There is too little history to check it: {trust.of} past"
+        f" {horizon}-week promises could be replayed without overlap."
+    )
+
+
+def _clear_date_sentence(
+    forecast: dict[str, Any],
+    dates: DateSummary | None,
+    issues: str = "open issues",
+) -> str:
+    if forecast["p85_date"] is None:
+        sentence = (
+            f"Not all {forecast['backlog']} {issues} will be done"
+            " within 2 years at this pace"
+        )
+    else:
+        sentence = (
+            f"All {forecast['backlog']} {issues} done"
+            f" by {forecast['p85_date']:%d %b %Y} (85% chance)"
+        )
+    if dates is not None and dates.judged >= MIN_INDEPENDENT_OUTCOMES:
+        return f"{sentence}; past dates like it held {dates.held} of {dates.judged}."
+    if dates is not None and dates.judged:
+        return (
+            f"{sentence}; only {dates.judged} past date"
+            f"{'' if dates.judged == 1 else 's'} like it"
+            f" {'has' if dates.judged == 1 else 'have'} come due, too few to check it."
+        )
+    # beyond the checked horizon nothing replays the date, and it leans optimistic
+    return f"{sentence}; no past date like it has come due to check it."
+
+
+def scope_verdict(jql: str, scope: ScopeResult, trust: Trust) -> list[str]:
+    """Say when the release a forecast query names gets done, and what that rests on."""
+    forecast = scope.forecast
+    if not forecast:
+        return [f"Release {jql}: nothing left to forecast, or too little history."]
+    open_work = scope.open_work
+    if scope.basis == "measured" and open_work:
+        # the trust is earned by replaying the H-week promise, so it must follow
+        # that promise; the clear date gets its own, separate check
+        return [
+            f"Release {jql}: at least {open_work['at_least_85']:.0f} of its"
+            f" {open_work['n_open']} open issues done in {open_work['horizon']}"
+            f" weeks, by {open_work['by_date']:%d %b %Y} (85% chance),"
+            " paced by its own finishes.",
+            _trust_sentence(trust, open_work["horizon"]),
+            _clear_date_sentence(forecast, scope.dates, "of its open issues"),
+        ]
+    when = (
+        "not within 2 years"
+        if forecast["p85_date"] is None
+        else f"by {forecast['p85_date']:%d %b %Y}"
+    )
+    return [
+        f"Release {jql}: all {forecast['backlog']} open issues done {when}"
+        " (85% chance), at an assumed share of the team's time.",
+        "That share is not checked against the past.",
+    ]
 
 
 def diagnose_backtest(summaries: Sequence[BacktestSummary]) -> str:

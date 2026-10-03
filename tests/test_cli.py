@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -438,6 +439,38 @@ def test_backtest_replays_issues_open_at_each_monday():
     assert "85% of backlog done" not in report
     assert "<td>throughput, last 12 weeks, pace used</td>" in report
     assert "Clear dates: " in result.output
+    # plotly's bundled script is code, not words a reader sees
+    overview = re.sub(
+        r"<script.*?</script>",
+        "",
+        report[report.index("<body>") : report.index("<details>")],
+        flags=re.DOTALL,
+    )
+    assert "of the 32 open issues will be done in" in overview
+    for jargon in ("CRPS", "u-plot", "y-plot", "Kolmogorov", "p ="):
+        assert jargon not in overview
+
+
+def test_plotly_js_precedes_first_chart():
+    _, report = _run_release()
+    first_chart = report.index('class="plotly-graph-div"')
+    assert report.index("plotly.js v") < first_chart
+    assert report.count("plotly.js v") == 1
+    # the open list and the release come first, before the flow charts
+    charts = [m.start() for m in re.finditer('class="plotly-graph-div"', report)]
+    _, release, scatter = charts[:3]
+    assert release < report.index("fixVersion = 7.2", release) < scatter
+
+
+def test_release_verdict_ends_on_the_action():
+    _, report = _run_release()
+    section = report[report.index('<section class="verdict">') :]
+    lines = re.findall(r"<p>(.*?)</p>", section[: section.index("</section>")])
+    assert any(line.startswith("Release fixVersion = 7.2") for line in lines)
+    assert lines[-1].startswith(
+        ("Commit to the number", "Treat the number"),
+    )
+    assert "--forecast-jql" not in " ".join(lines)
 
 
 def test_cli_notes_no_share_for_a_forecast_it_does_not_make():

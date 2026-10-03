@@ -31,9 +31,9 @@ if TYPE_CHECKING:
 
     # pace -> horizon -> past forecasts
     BacktestRuns = dict["Pace", dict[int, list[Backtest]]]
-    # the trust tile, summaries by model, the model used, the note and the chart
+    # the judged summary, summaries by model, the model used, the note and the chart
     BacktestReport = tuple[
-        "Tile",
+        BacktestSummary | None,
         dict[str, list[BacktestSummary]],
         str,
         str | None,
@@ -116,8 +116,11 @@ from metrics.services.stats import (
     build_stuck_rows,
     date_check_note,
     diagnose_backtest,
+    forecast_verdict,
     recalibration_note,
     scope_forecast_tile,
+    scope_verdict,
+    trust,
 )
 
 try:
@@ -641,20 +644,21 @@ def calculate_metrics(  # noqa: PLR0913
     cfd = cumulative_flow(issues, now=now)
     aging = aging_wip(issues, now=now)
     throughput = weekly_throughput(issues, now=now)
-    pace, forecast, open_work, checked = _forecast(
+    pace, forecast, open_work, checked, dates = _forecast(
         repo,
         issues,
         throughput,
         vis_service,
         output_dir,
     )
-    backtest, backtests, used_model, backtest_note, backtest_chart = checked or (
+    judged, backtests, used_model, backtest_note, backtest_chart = checked or (
         None,
         {},
         None,
         None,
         None,
     )
+    flow = backlog_flow(issues, throughput, now, pace)
 
     report_images = _render_static_charts(
         issues,
@@ -663,20 +667,29 @@ def calculate_metrics(  # noqa: PLR0913
         output_dir,
         throughput,
     )
-    _render_flow_pngs(vis_service, output_dir, scatter, cfd, aging, forecast)
+    _render_flow_pngs(
+        vis_service,
+        output_dir,
+        scatter,
+        cfd,
+        aging,
+        forecast,
+        _promise(open_work),
+    )
 
-    fragments = [
-        interactive_service.scatter_fragment(scatter, include_js=True),
-        interactive_service.cfd_fragment(cfd),
-    ]
-    if not aging.empty:
-        fragments.append(interactive_service.aging_fragment(aging))
+    # plotly's script rides on whichever chart comes first
+    fragments = []
     if forecast:
-        fragments.append(interactive_service.forecast_fragment(forecast))
-    if backtest_chart:
-        report_images.insert(0, backtest_chart)
+        fragments.append(
+            interactive_service.forecast_fragment(
+                forecast,
+                include_js=True,
+                promise=_promise(open_work),
+            ),
+        )
 
     scope_tile = None
+    release: list[str] = []
     if repo.snapshot.forecast_jql:
         scope = repo.forecast_issues()
         scope_moment_at = cache(lambda at: moment_of(repo.forecast_issues_at(at), at))
@@ -697,18 +710,46 @@ def calculate_metrics(  # noqa: PLR0913
             note=note,
         )
         click.echo(title.replace("\n", ": "))
-        if scope_runs := _summaries(scoped.runs):
+        scope_runs = _summaries(scoped.runs)
+        if scope_runs:
             backtests = {**backtests, "scope: open work": list(scope_runs.values())}
+        release = scope_verdict(
+            repo.snapshot.forecast_jql,
+            scoped,
+            trust(judged_summary(list(scope_runs.values()))),
+        )
         if scope_forecast:
+            scope_promise = _promise(scoped.open_work)
             vis_service.vis_forecast(
                 str(output_dir / "forecast_scope.png"),
                 scope_forecast,
                 title=title,
+                promise=scope_promise,
             )
-            fragments.insert(
-                0,
-                interactive_service.forecast_fragment(scope_forecast, title=title),
+            fragments.append(
+                interactive_service.forecast_fragment(
+                    scope_forecast,
+                    include_js=not fragments,
+                    title=title,
+                    promise=scope_promise,
+                ),
             )
+
+    verdict = forecast_verdict(
+        open_work,
+        forecast,
+        trust(judged),
+        flow,
+        dates,
+        release,
+    )
+
+    fragments += [
+        interactive_service.scatter_fragment(scatter, include_js=not fragments),
+        interactive_service.cfd_fragment(cfd),
+    ]
+    if not aging.empty:
+        fragments.append(interactive_service.aging_fragment(aging))
 
     tiles = build_headline_tiles(
         scatter,
@@ -717,13 +758,15 @@ def calculate_metrics(  # noqa: PLR0913
         forecast,
         throughput,
         flow_efficiency(issues, active_statuses),
-        backtest=backtest,
+        backtest=backtest_tile(judged),
         scope_tile=scope_tile,
-        flow=backlog_flow(issues, throughput, now, pace),
+        flow=flow,
     )
     comparison = None
+    delivery_tiles: list[Tile] = []
+    delivery_charts: list[Path] = []
     if repo.snapshot.delivery:
-        delivery_tiles, comparison, charts = _report_delivery(
+        delivery_tiles, comparison, delivery_charts = _report_delivery(
             repo.snapshot.delivery,
             now,
             agent_authors,
@@ -731,9 +774,12 @@ def calculate_metrics(  # noqa: PLR0913
             vis_service,
             output_dir,
         )
-        tiles.extend(delivery_tiles)
-        report_images.extend(charts)
 
+    method_note = " ".join(
+        part
+        for part in (backtest_note, date_check_note(dates) if dates else None)
+        if part
+    )
     report_path = output_dir / "report.html"
     report_service.render(
         str(report_path),
@@ -744,7 +790,11 @@ def calculate_metrics(  # noqa: PLR0913
         agent_comparison=comparison,
         backtests=backtests,
         used_model=used_model,
-        backtest_note=backtest_note,
+        backtest_note=method_note or None,
+        verdict=verdict,
+        method_images=[backtest_chart] if backtest_chart else [],
+        delivery_tiles=delivery_tiles,
+        delivery_images=delivery_charts,
     )
     click.echo(f"Report: {report_path}")
 
@@ -755,16 +805,22 @@ def _forecast(
     throughput: dict[str, int],
     vis_service: VisService,
     output_dir: Path,
-) -> tuple[Pace, dict[str, Any], dict[str, Any], BacktestReport | None]:
+) -> tuple[
+    Pace,
+    dict[str, Any],
+    dict[str, Any],
+    BacktestReport | None,
+    DateSummary | None,
+]:
     """Forecast the open issues and judge the forecast by replaying it.
 
-    Returns the pace, the date forecast, the open-work forecast and, if the
-    backtests ran, what _report_backtest says about them.
+    Returns the pace, the date forecast, the open-work forecast, what
+    _report_backtest says about it if the backtests ran, and the date replay.
     """
     now = repo.snapshot.fetched_at
     weeks = list(throughput)
     if not any(issue.is_open for issue in issues):
-        return DEFAULT_PACE, {}, {}, None
+        return DEFAULT_PACE, {}, {}, None, None
     pace, moment_at, runs = _choose_forecast_pace(repo, throughput)
     model, baseline = _open_work_runs(moment_at, weeks, pace)
     recalibrated, past_us = _choose_recalibration(moment_at, weeks, pace, model)
@@ -782,7 +838,7 @@ def _forecast(
         shares=shares,
     )
     if not forecast:
-        return pace, forecast, {}, None
+        return pace, forecast, {}, None, None
     if not measured:
         click.echo(
             "Forecast: share of finishes going to open issues not measured"
@@ -813,8 +869,9 @@ def _forecast(
         vis_service,
         output_dir,
     )
-    click.echo(date_check_note(_date_summary(moment_at, weeks, horizon, pace)))
-    return pace, forecast, open_work, checked
+    dates = _date_summary(moment_at, weeks, horizon, pace)
+    click.echo(date_check_note(dates))
+    return pace, forecast, open_work, checked, dates
 
 
 def _date_summary(
@@ -948,8 +1005,8 @@ def _report_backtest(  # noqa: PLR0913
 ) -> BacktestReport:
     """Judge the open-work forecast by its replay, beside the baseline and paces.
 
-    Returns the tile, summaries by model name, the model used, the note on its
-    errors and the chart.
+    Returns the judged summary, summaries by model name, the model used, the
+    note on its errors and the chart.
     """
     applied = open_work["recalibrated"]
     used_runs = recalibrated if applied and recalibrated is not None else model
@@ -980,7 +1037,7 @@ def _report_backtest(  # noqa: PLR0913
     judged = summaries.get(open_work["horizon"])
     if judged is None:
         click.echo("Backtest: too little history to replay the open-work forecast")
-        return backtest_tile(None), tables, used_model, None, None
+        return None, tables, used_model, None, None
     raw = _summaries(model)
     note = diagnose_backtest(list(raw.values()))
     raw_judged = judged_summary(list(raw.values()))
@@ -991,7 +1048,7 @@ def _report_backtest(  # noqa: PLR0913
     click.echo(f"Backtest: {note}")
     chart = output_dir / "forecast_backtest.png"
     vis_service.vis_backtest(str(chart), used_runs, summaries, judged.horizon)
-    return backtest_tile(judged), tables, used_model, note, chart
+    return judged, tables, used_model, note, chart
 
 
 def _report_delivery(  # noqa: PLR0913
@@ -1203,6 +1260,13 @@ def _render_static_charts(
     return charts
 
 
+def _promise(open_work: dict[str, Any]) -> tuple[int, float] | None:
+    """Mark the fan at the headline's horizon and the issues it promises done."""
+    if not open_work:
+        return None
+    return open_work["horizon"], open_work["at_least_85"]
+
+
 def _render_flow_pngs(  # noqa: PLR0913
     vis_service: VisService,
     output_dir: Path,
@@ -1210,6 +1274,7 @@ def _render_flow_pngs(  # noqa: PLR0913
     cfd: pd.DataFrame,
     aging: pd.DataFrame,
     forecast: dict[str, Any],
+    promise: tuple[int, float] | None,
 ) -> None:
     """Write the flow charts as PNGs (the report embeds them interactively)."""
     logger = logging.getLogger(__name__)
@@ -1223,7 +1288,11 @@ def _render_flow_pngs(  # noqa: PLR0913
     else:
         vis_service.vis_aging_wip(str(output_dir / "aging_wip.png"), aging)
     if forecast:
-        vis_service.vis_forecast(str(output_dir / "forecast.png"), forecast)
+        vis_service.vis_forecast(
+            str(output_dir / "forecast.png"),
+            forecast,
+            promise=promise,
+        )
     else:
         logger.info(
             "Skipping forecast chart: no open issues"

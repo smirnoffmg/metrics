@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import html
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,7 +26,7 @@ _PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<title>Jira Metrics Report</title>
+<title>Delivery forecast</title>
 <style>
 body {{ font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
        margin: 2rem auto; max-width: 1080px; color: #0b0b0b; background: #f9f9f7; }}
@@ -43,21 +44,55 @@ img {{ max-width: 100%; }}
 section {{ margin-bottom: 2rem; background: #fcfcfb; border-radius: 8px;
           border: 1px solid rgba(11,11,11,0.10); padding: 1rem; }}
 h2 {{ text-transform: capitalize; font-size: 1.1rem; color: #52514e; }}
+.verdict {{ font-size: 1.15rem; line-height: 1.5; }}
+.verdict p {{ margin: 0.3rem 0; }}
+.verdict p:last-child {{ font-weight: 650; }}
+details {{ margin-bottom: 2rem; }}
+summary {{ cursor: pointer; font-size: 1.1rem; font-weight: 650; color: #52514e;
+          padding: 0.6rem 0; }}
 footer {{ color: #898781; font-size: 0.8rem; }}
 </style>
 </head>
 <body>
-<h1>Jira Metrics Report</h1>
+<h1>Delivery forecast</h1>
+{verdict}
 <div class="tiles">{tiles}</div>
 {fragments}
 {stuck_table}
-{agent_table}
-{backtest_table}
 {sections}
-<footer>Generated {generated_at}</footer>
+{delivery}
+{method}
+<footer><p>These numbers describe the system; don't turn them into targets.</p>
+<p>Generated {generated_at}</p></footer>
 </body>
 </html>
 """
+
+
+def _verdict_html(verdict: Sequence[str]) -> str:
+    if not verdict:
+        return ""
+    body = "".join(f"<p>{html.escape(line, quote=False)}</p>" for line in verdict)
+    return f'<section class="verdict">{body}</section>'
+
+
+def _details_html(summary: str, *parts: str) -> str:
+    body = "\n".join(part for part in parts if part)
+    if not body:
+        return ""
+    return f"<details><summary>{summary}</summary>\n{body}\n</details>"
+
+
+def _image_sections(images: Iterable[Path]) -> list[str]:
+    sections = []
+    for image in images:
+        encoded = base64.b64encode(image.read_bytes()).decode("ascii")
+        title = image.stem.replace("_", " ")
+        sections.append(
+            f'<section><h2>{title}</h2><img alt="{title}" '
+            f'src="data:image/png;base64,{encoded}"/></section>',
+        )
+    return sections
 
 
 def _tile_html(tile: Tile) -> str:
@@ -121,7 +156,7 @@ def _backtest_table_html(
     note: str | None,
 ) -> str:
     if not by_model:
-        return ""
+        return f"<section><p>{note}</p></section>" if note else ""
 
     def model_cell(model: str) -> str:
         return f"<b>{model}, used</b>" if model == used else model
@@ -159,28 +194,33 @@ class ReportService(BaseService):
         backtests: Mapping[str, Sequence[BacktestSummary]] | None = None,
         used_model: str | None = None,
         backtest_note: str | None = None,
+        verdict: Sequence[str] = (),
+        method_images: Sequence[Path] = (),
+        delivery_tiles: Sequence[Tile] = (),
+        delivery_images: Sequence[Path] = (),
     ) -> None:
-        """Write the report: tiles, interactive charts, stuck table, PNGs."""
-        sections = []
-        for image in images:
-            encoded = base64.b64encode(image.read_bytes()).decode("ascii")
-            title = image.stem.replace("_", " ")
-            sections.append(
-                f'<section><h2>{title}</h2><img alt="{title}" '
-                f'src="data:image/png;base64,{encoded}"/></section>',
-            )
-        html = _PAGE.format(
+        """Write the report: verdict and charts first, delivery and method folded."""
+        delivery_tiles_html = "".join(_tile_html(tile) for tile in delivery_tiles)
+        page = _PAGE.format(
+            verdict=_verdict_html(verdict),
             tiles="".join(_tile_html(tile) for tile in tiles),
             fragments="\n".join(f"<section>{f}</section>" for f in fragments),
             stuck_table=_stuck_table_html(stuck_rows),
-            agent_table=_agent_table_html(agent_comparison),
-            backtest_table=_backtest_table_html(
-                backtests or {},
-                used_model,
-                backtest_note,
+            sections="\n".join(_image_sections(images)),
+            delivery=_details_html(
+                "Delivery (DORA)",
+                f'<div class="tiles">{delivery_tiles_html}</div>'
+                if delivery_tiles
+                else "",
+                _agent_table_html(agent_comparison),
+                *_image_sections(delivery_images),
             ),
-            sections="\n".join(sections),
+            method=_details_html(
+                "How the forecast was checked",
+                _backtest_table_html(backtests or {}, used_model, backtest_note),
+                *_image_sections(method_images),
+            ),
             generated_at=datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC"),
         )
-        Path(filename).write_text(html, encoding="utf-8")
+        Path(filename).write_text(page, encoding="utf-8")
         self.logger.info("Report written to %s", filename)

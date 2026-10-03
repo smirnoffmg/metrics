@@ -13,6 +13,7 @@ from metrics.services.vis import (
     VisService,
     biggest_drop,
     body_ticks,
+    fan_lines,
     split_tail,
     tail_threshold,
 )
@@ -67,6 +68,9 @@ def test_visservice_vis_forecast_creates_file(temp_png_file):
     result = {
         "weeks": np.array([3, 4, 4, 5, 6]),
         "backlog": 10,
+        "max_weeks": 6,
+        "done_p50": np.array([2.0, 5.0, 8.0, 10.0, 10.0, 10.0]),
+        "done_at_least_85": np.array([1.0, 3.0, 6.0, 8.0, 10.0, 10.0]),
         "p50": 4.0,
         "p50_date": date(2026, 8, 12),
         "p85": 5.0,
@@ -74,7 +78,7 @@ def test_visservice_vis_forecast_creates_file(temp_png_file):
         "p95": 6.0,
         "p95_date": date(2026, 8, 26),
     }
-    VisService().vis_forecast(temp_png_file, result)
+    VisService().vis_forecast(temp_png_file, result, promise=(4, 6.0))
     assert Path(temp_png_file).exists()
 
 
@@ -238,3 +242,16 @@ def test_visservice_vis_backtest_creates_file(temp_png_file):
     }
     VisService().vis_backtest(temp_png_file, runs, summaries, horizon=30)
     assert Path(temp_png_file).exists()
+
+
+def test_fan_lines_stop_a_little_past_the_list_clearing():
+    result = {
+        "backlog": 4,
+        "done_p50": np.array([2.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0]),
+        "done_at_least_85": np.array([1.0, 3.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0]),
+    }
+    weeks, median_left, left_85 = fan_lines(result)
+    # 85% line last above zero at week 2, then three weeks more to show it flat
+    assert weeks == [0, 1, 2, 3, 4]
+    assert left_85 == [4, 3.0, 1.0, 0.0, 0.0]
+    assert median_left == [4, 2.0, 0.0, 0.0, 0.0]

@@ -18,6 +18,7 @@ from .vis import (
     PERCENTILES,
     SERIES,
     SURFACE,
+    fan_lines,
     fold_rare_columns,
 )
 
@@ -110,33 +111,63 @@ class InteractiveVisService(BaseService):
         *,
         include_js: bool = False,
         title: str | None = None,
+        promise: tuple[int, float] | None = None,
     ) -> str:
-        """Monte Carlo histogram with dated percentile lines."""
-        fig = go.Figure(
-            go.Histogram(
-                x=result["weeks"],
-                marker_color=SERIES,
-                hovertemplate="%{x} weeks: %{y} simulations<extra></extra>",
+        """Issues of today's list still open week by week, at the median and at 85%."""
+        weeks, median_left, left_85 = fan_lines(result)
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=weeks,
+                y=left_85,
+                mode="lines",
+                line={"color": SERIES, "width": 2},
+                name="85% chance of at most",
+                hovertemplate="week %{x}: at most %{y:.0f} open (85%)<extra></extra>",
             ),
         )
-        for pct, dash in zip(PERCENTILES, LINE_DASHES, strict=True):
-            if result[f"p{pct}"] is None:
-                continue
+        fig.add_trace(
+            go.Scatter(
+                x=weeks,
+                y=median_left,
+                mode="lines",
+                fill="tonexty",
+                fillcolor="rgba(42,120,214,0.12)",
+                line={"color": INK_SECONDARY, "width": 1.5, "dash": "dash"},
+                name="50% chance of at most",
+                hovertemplate="week %{x}: %{y:.0f} open (median)<extra></extra>",
+            ),
+        )
+        if promise is not None and promise[0] < len(weeks):
+            fig.add_trace(
+                go.Scatter(
+                    x=[promise[0]],
+                    y=[result["backlog"] - promise[1]],
+                    mode="markers+text",
+                    marker={"color": SERIES, "size": 11},
+                    text=[f"in {promise[0]} weeks"],
+                    textposition="bottom right",
+                    showlegend=False,
+                    hoverinfo="skip",
+                ),
+            )
+        if result["p85"] is not None:
             fig.add_vline(
-                x=result[f"p{pct}"],
-                line_dash=dash,
+                x=result["p85"],
+                line_dash="dot",
                 line_color=INK_SECONDARY,
-                annotation_text=f"p{pct}: by {result[f'p{pct}_date']:%d %b %Y}",
+                annotation_text=f"all done by {result['p85_date']:%d %b %Y} (85%)",
                 annotation_font_color=INK_SECONDARY,
             )
         fig.update_layout(
             # plotly renders HTML tags in titles, and JQL is full of < and >
             title=html.escape(title).replace("\n", "<br>")
             if title
-            else f"Monte Carlo Forecast ({result['backlog']} open issues)",
-            xaxis_title="weeks to complete backlog",
-            yaxis_title="simulations",
-            showlegend=False,
+            else f"How many of the {result['backlog']} open issues stay open",
+            xaxis_title="weeks from now",
+            yaxis_title="issues from today's list still open",
+            yaxis_rangemode="tozero",
+            legend={"x": 0.99, "xanchor": "right", "y": 0.99},
         )
         return self._to_fragment(fig, include_js=include_js)
 
